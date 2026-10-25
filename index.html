@@ -1,0 +1,1290 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fantasy Fortèball — Real-Time Sleeper Tracker & Monte Carlo Forecast</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="./engine.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
+
+    :root {
+      --slp-bg: #0f131c;
+      --slp-surface: #171c28;
+      --slp-card: #1d2433;
+      --slp-card-hover: #242d40;
+      --slp-border: #2b354b;
+      --slp-mint: #00ceb8;
+      --slp-blue: #38bdf8;
+      --slp-purple: #818cf8;
+      --slp-amber: #fbbf24;
+      --slp-rose: #fb7185;
+    }
+
+    body {
+      background-color: var(--slp-bg);
+      color: #f1f5f9;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    .font-mono-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Sleeper Position Badges */
+    .pos-QB { background: rgba(255, 90, 138, 0.16); color: #ff6b98; border: 1px solid rgba(255, 90, 138, 0.35); }
+    .pos-RB { background: rgba(0, 206, 184, 0.16); color: #00e5cc; border: 1px solid rgba(0, 206, 184, 0.35); }
+    .pos-WR { background: rgba(86, 182, 255, 0.16); color: #67c0ff; border: 1px solid rgba(86, 182, 255, 0.35); }
+    .pos-TE { background: rgba(255, 174, 88, 0.16); color: #ffba6b; border: 1px solid rgba(255, 174, 88, 0.35); }
+    .pos-FLEX { background: rgba(168, 85, 247, 0.16); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); }
+    .pos-SUPER_FLEX { background: rgba(236, 72, 153, 0.18); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.4); }
+    .pos-DL, .pos-DE, .pos-DT { background: rgba(249, 115, 22, 0.16); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.35); }
+    .pos-LB { background: rgba(139, 92, 246, 0.16); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.35); }
+    .pos-DB, .pos-CB, .pos-S { background: rgba(20, 184, 166, 0.16); color: #2dd4bf; border: 1px solid rgba(20, 184, 166, 0.35); }
+    .pos-IDP_FLEX { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.35); }
+
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
+    .live-dot {
+      animation: pulseGlow 1.6s infinite ease-in-out;
+    }
+
+    @keyframes scoreFlash {
+      0% { background-color: rgba(0, 206, 184, 0.35); }
+      100% { background-color: transparent; }
+    }
+    .score-updated {
+      animation: scoreFlash 1.8s ease-out;
+    }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f131c; }
+    ::-webkit-scrollbar-thumb { background: #2b354b; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3e4c6b; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col selection:bg-[#00ceb8]/30 selection:text-[#00ceb8]">
+
+  <!-- TOP HEADER BAR -->
+  <header class="sticky top-0 z-30 bg-[#131824]/95 backdrop-blur-md border-b border-[#263044] px-4 py-3">
+    <div class="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-3">
+      <!-- League Identity -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-[#00ceb8] to-[#3b82f6] p-0.5 shadow-lg shadow-[#00ceb8]/10">
+          <div class="w-full h-full bg-[#131824] rounded-[10px] flex items-center justify-center font-extrabold text-sm text-[#00ceb8]">
+            FF
+          </div>
+        </div>
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <h1 id="league-name" class="text-base sm:text-lg font-bold tracking-tight text-white">Fantasy Fortèball</h1>
+            <span id="season-badge" class="px-2 py-0.5 text-xs font-semibold rounded-full bg-[#00ceb8]/15 text-[#00ceb8] border border-[#00ceb8]/30">
+              2026 • Median Match
+            </span>
+          </div>
+          <p class="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
+            <span>League ID: <code id="league-id-display" class="text-slate-300 font-mono-num">1312258310212165632</code></span>
+            <span>•</span>
+            <span class="text-emerald-400 flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 live-dot"></span>
+              Auto-Syncs Weeks & Lineups (10k MC)
+            </span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Main Navigation Tabs -->
+      <div class="flex items-center bg-[#1a2130] p-1 rounded-xl border border-[#2b354b]">
+        <button onclick="switchTab('matchups')" id="tab-btn-matchups" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[#00ceb8] text-slate-950 shadow">
+          Live Matchups
+        </button>
+        <button onclick="switchTab('median')" id="tab-btn-median" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white">
+          Median Forecast & Race
+        </button>
+        <button onclick="switchTab('activity')" id="tab-btn-activity" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white flex items-center gap-1.5">
+          <span>Lineup & Score Log</span>
+          <span id="activity-count-badge" class="px-1.5 py-0.2 rounded-full bg-[#2b354b] text-slate-300 font-mono-num text-xs">0</span>
+        </button>
+        <button onclick="switchTab('model')" id="tab-btn-model" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white">
+          Model Info
+        </button>
+      </div>
+
+      <!-- Controls: Dynamic Week Selector, Smart Auto-Sub Toggle, Sleeper Deltas, Live Sync -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <div class="flex items-center gap-1.5 bg-[#1a2130] px-2.5 py-1.5 rounded-xl border border-[#2b354b]">
+          <label for="week-select" class="text-xs text-slate-400 font-medium">Week</label>
+          <select id="week-select" onchange="onWeekChange()" class="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer">
+            <!-- Dynamically populated from Sleeper NFL State (Weeks 1-18) -->
+          </select>
+        </div>
+
+        <button onclick="toggleAutoSubMode()" id="autosub-toggle-btn"
+                title="Automatically substitute BYE or OUT starters with highest-projected eligible bench players for future weeks"
+                class="px-3 py-1.5 rounded-xl text-xs font-semibold border border-[#2b354b] bg-[#1a2130] text-slate-300 hover:border-amber-400/50 transition flex items-center gap-1.5">
+          <span>⚡ Auto-Sub BYE/OUT:</span>
+          <span id="autosub-state-label" class="font-bold text-slate-400">OFF</span>
+        </button>
+
+        <button onclick="toggleComparisonMode()" id="compare-toggle-btn" class="px-3 py-1.5 rounded-xl text-xs font-semibold border border-[#3b82f6]/40 bg-[#3b82f6]/15 text-[#60a5fa] hover:bg-[#3b82f6]/25 transition flex items-center gap-1.5">
+          <span>Sleeper Deltas:</span>
+          <span id="compare-state-label" class="font-bold text-white">ON</span>
+        </button>
+
+        <div class="flex items-center gap-2 bg-[#1a2130] px-3 py-1.5 rounded-xl border border-[#2b354b]">
+          <span id="poll-indicator" class="w-2 h-2 rounded-full bg-[#00ceb8] live-dot"></span>
+          <span id="countdown-label" class="text-xs text-slate-300 font-mono-num">10s</span>
+          <button onclick="fetchLiveState(true)" class="text-xs font-semibold text-[#00ceb8] hover:underline ml-1">
+            Sync
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- LIVE NFL SCOREBOARD STRIP -->
+  <div class="bg-[#141924] border-b border-[#232c3d] px-4 py-2 overflow-x-auto">
+    <div id="nfl-ticker" class="max-w-[1600px] mx-auto flex items-center gap-2.5 min-w-max">
+      <span class="text-xs text-slate-400">Syncing live NFL game clocks & lineups from Sleeper...</span>
+    </div>
+  </div>
+
+  <!-- TOP SUMMARY BANNER: IMPROVED MEDIAN FORECAST VS SLEEPER -->
+  <section class="max-w-[1600px] w-full mx-auto px-4 pt-4">
+    <div class="bg-gradient-to-r from-[#192132] via-[#1d2538] to-[#192132] border border-[#2d3850] rounded-2xl p-4 shadow-xl">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
+        <!-- Left: True Expected Median vs Sleeper Static Median -->
+        <div class="lg:col-span-5 flex flex-wrap sm:flex-nowrap items-center gap-4 border-b lg:border-b-0 lg:border-r border-[#2d3850] pb-3 lg:pb-0 lg:pr-4">
+          <div class="bg-[#121723] border border-[#00ceb8]/35 rounded-xl px-4 py-2.5 flex-1 min-w-[180px]">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold uppercase tracking-wider text-[#00ceb8]">Improved Expected Median</span>
+              <span class="text-xs px-1.5 py-0.5 rounded bg-[#00ceb8]/15 text-[#00ceb8] font-mono-num">MC Joint</span>
+            </div>
+            <div class="flex items-baseline gap-2 mt-1">
+              <span id="banner-imp-median" class="text-2xl sm:text-3xl font-extrabold font-mono-num text-white">--</span>
+              <span id="banner-med-delta" class="text-xs font-bold font-mono-num px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">--</span>
+            </div>
+            <p id="banner-med-ci" class="text-xs text-slate-400 mt-0.5 font-mono-num">80% CI: -- to --</p>
+          </div>
+
+          <div class="bg-[#121723]/70 border border-[#2b354b] rounded-xl px-4 py-2.5 flex-1 min-w-[165px]">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Sleeper Static Median</span>
+              <span class="text-xs px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-300">Naive #5/#6 Avg</span>
+            </div>
+            <div class="flex items-baseline gap-2 mt-1">
+              <span id="banner-slp-median" class="text-2xl sm:text-3xl font-bold font-mono-num text-slate-300">--</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">Ignores order-statistic skew</p>
+          </div>
+        </div>
+
+        <!-- Middle: Why Median Differs Right Now -->
+        <div class="lg:col-span-4 border-b lg:border-b-0 lg:border-r border-[#2d3850] pb-3 lg:pb-0 lg:pr-4">
+          <div class="flex items-center gap-1.5 text-xs font-semibold text-amber-300 mb-1">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span>Live Median Cutoff Insight (#5 vs #6 Bubble)</span>
+          </div>
+          <p id="banner-insight-text" class="text-xs text-slate-300 leading-relaxed">
+            Calculating joint order statistics across all 10 rosters...
+          </p>
+        </div>
+
+        <!-- Right: Bubble Race Mini-Pills (#4, #5, #6, #7) -->
+        <div class="lg:col-span-3">
+          <div class="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+            <span class="font-semibold text-slate-300">Live Median Bubble (#4 – #7)</span>
+            <button onclick="switchTab('median')" class="text-[#00ceb8] hover:underline font-medium">Full Table →</button>
+          </div>
+          <div id="banner-bubble-list" class="space-y-1"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MAIN CONTENT AREA -->
+  <main class="max-w-[1600px] w-full mx-auto px-4 py-4 flex-1">
+
+    <!-- TAB 1: LIVE MATCHUPS (SLEEPER-STYLE MASTER-DETAIL) -->
+    <div id="tab-content-matchups" class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+      <!-- Left Column: All 5 Matchup Cards -->
+      <div class="lg:col-span-5 space-y-3">
+        <div class="flex items-center justify-between px-1">
+          <h2 id="matchups-col-heading" class="text-sm font-bold uppercase tracking-wider text-slate-300">Week Matchups</h2>
+          <span class="text-xs text-slate-400">Click any matchup for full lineup & bench</span>
+        </div>
+        <div id="matchups-list" class="space-y-3"></div>
+      </div>
+
+      <!-- Right Column: Selected Matchup Head-to-Head Lineup Detail -->
+      <div class="lg:col-span-7 bg-[#171c28] border border-[#2b354b] rounded-2xl overflow-hidden shadow-2xl">
+        <div id="selected-matchup-detail">
+          <div class="p-8 text-center text-slate-400 text-sm">Loading matchup details...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: LEAGUE MEDIAN FORECAST & 10-TEAM RACE -->
+    <div id="tab-content-median" class="hidden space-y-5">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <div class="lg:col-span-8 bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+            <div>
+              <h2 class="text-base font-bold text-white">Live League Median Race (Top 5 Earn Extra Win)</h2>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Sorted by Improved Live Projection. Shows 10th–90th percentile score range, true Median Win %, and Expected Weekly Wins (H2H + Median).
+              </p>
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <span class="px-2.5 py-1 rounded-lg bg-[#00ceb8]/15 text-[#00ceb8] border border-[#00ceb8]/30 font-mono-num font-semibold">
+                Target Median: <span id="table-target-median">--</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="border-b border-[#2b354b] text-xs text-slate-400 uppercase">
+                  <th class="py-2.5 px-2">Rank</th>
+                  <th class="py-2.5 px-2">Team</th>
+                  <th class="py-2.5 px-2 text-right">Current</th>
+                  <th class="py-2.5 px-2 text-right">Improved Proj</th>
+                  <th class="py-2.5 px-2 text-right">vs Sleeper</th>
+                  <th class="py-2.5 px-3 text-center">Simulated Range (10th–90th)</th>
+                  <th class="py-2.5 px-2 text-right">Median Win %</th>
+                  <th class="py-2.5 px-2 text-right">H2H Win %</th>
+                  <th class="py-2.5 px-2 text-center">2-0 / 1-1 / 0-2</th>
+                </tr>
+              </thead>
+              <tbody id="median-leaderboard-tbody" class="divide-y divide-[#232c3f] text-sm"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="lg:col-span-4 space-y-5">
+          <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl">
+            <h3 class="text-sm font-bold text-white uppercase tracking-wider mb-1">
+              Simulated League Median Distribution
+            </h3>
+            <p class="text-xs text-slate-400 mb-4">
+              Probability density of the 5th/6th cutoff score across 10,000 correlated simulations.
+            </p>
+            <div id="median-histogram-chart" class="h-48 flex items-end gap-1 pt-6 pb-2 px-1 border-b border-[#2b354b]"></div>
+            <div class="flex justify-between text-xs font-mono-num text-slate-400 mt-2">
+              <span id="hist-min-label">--</span>
+              <span class="text-[#00ceb8] font-semibold">Expected: <span id="hist-mean-label">--</span></span>
+              <span id="hist-max-label">--</span>
+            </div>
+
+            <div class="mt-4 pt-3 border-t border-[#2b354b] space-y-2 text-xs">
+              <div class="flex justify-between">
+                <span class="text-slate-400">Sleeper Static Median (5th/6th Avg):</span>
+                <span id="diag-slp-med" class="font-mono-num font-semibold text-slate-200">--</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-400">Improved Static Median (5th/6th Avg):</span>
+                <span id="diag-imp-static-med" class="font-mono-num font-semibold text-slate-200">--</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-[#00ceb8] font-medium">True Expected Median E[0.5*(S₅+S₆)]:</span>
+                <span id="diag-imp-mc-med" class="font-mono-num font-bold text-[#00ceb8]">--</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-400">Interquartile Range (25th – 75th):</span>
+                <span id="diag-med-iqr" class="font-mono-num text-slate-300">--</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-400">80% Confidence Interval (10th – 90th):</span>
+                <span id="diag-med-ci80" class="font-mono-num text-slate-300">--</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl space-y-2.5">
+            <h3 class="text-sm font-bold text-amber-300 uppercase tracking-wider">
+              Why Sleeper's Median Forecast Fails
+            </h3>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Sleeper computes its projected median by taking the static point projections of the 10 teams, sorting them, and averaging #5 and #6.
+            </p>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              <strong>Order-Statistic Selection Bias:</strong> When the top 4 teams lock in high scores and 5–6 bubble teams are chasing the #5 spot with volatile players left to play, the eventual #5 score is the <em>maximum</em> of those chasing teams (<code class="text-[#00ceb8]">E[max(X₅..X₁₀)] &gt; max(E[X₅]..E[X₁₀])</code>).
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: LIVE ACTIVITY LOG (LINEUP CHANGES & SCORE UPDATES) -->
+    <div id="tab-content-activity" class="hidden space-y-4">
+      <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-base font-bold text-white">Real-Time Lineup Changes & Scoring Feed</h2>
+            <p class="text-xs text-slate-400">
+              Automatically detects whenever any manager swaps starters/bench players in Sleeper or when live fantasy points change.
+            </p>
+          </div>
+          <button onclick="activityLog = []; renderActivityLog();" class="text-xs text-slate-400 hover:text-white">Clear Log</button>
+        </div>
+        <div id="activity-log-list" class="space-y-2 max-h-[550px] overflow-y-auto">
+          <div class="text-xs text-slate-400 py-4 text-center">Monitoring live Sleeper lineup swaps and scoring plays every 10 seconds...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: MODEL ARCHITECTURE & METHODOLOGY COMPARISON -->
+    <div id="tab-content-model" class="hidden space-y-5">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-6 space-y-3">
+          <div class="flex items-center gap-2 text-[#00ceb8] font-bold text-base">
+            <span class="px-2 py-0.5 rounded bg-[#00ceb8]/20 text-xs font-mono-num">1</span>
+            <h3>√t Volatility Scaling & Right-Skewed Scoring</h3>
+          </div>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            <strong>Sleeper's Flaw:</strong> Scales standard deviation nearly linearly with remaining clock fraction (<code class="text-rose-300">SD ∝ t_rem</code>) and uses symmetric Gaussian assumptions.
+          </p>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            <strong>Our Fix:</strong> Because football scoring is a stochastic jump process over drives, remaining variance scales with <code class="text-[#00ceb8]">t_eff</code>, meaning standard deviation scales with <code class="text-[#00ceb8]">√t_eff</code> (at 25% time left, 50% of full-game SD remains!). Uses an exact mean-0, variance-1 right-skewed normal transformation calibrated by position.
+          </p>
+        </div>
+
+        <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-6 space-y-3">
+          <div class="flex items-center gap-2 text-[#38bdf8] font-bold text-base">
+            <span class="px-2 py-0.5 rounded bg-[#38bdf8]/20 text-xs font-mono-num">2</span>
+            <h3>Correlated Stacks & Shared Game Environments</h3>
+          </div>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            <strong>Sleeper's Flaw:</strong> Treats every starter on every roster as statistically independent.
+          </p>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            <strong>Our Fix:</strong> In each of our 10,000 Monte Carlo trials, we draw latent NFL Game Pace factors (<code class="text-[#38bdf8]">Z_game</code>), Team Passing factors (<code class="text-[#38bdf8]">Z_pass</code>), and Team Rushing factors (<code class="text-[#38bdf8]">Z_rush</code>). Same-team QB–WR/TE stacks share <code class="text-[#38bdf8]">ρ ≈ +0.38</code> correlation.
+          </p>
+        </div>
+
+        <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-6 space-y-3">
+          <div class="flex items-center gap-2 text-amber-300 font-bold text-base">
+            <span class="px-2 py-0.5 rounded bg-amber-400/20 text-xs font-mono-num">3</span>
+            <h3>Bayesian In-Game Usage + Live Game Script & Red Zone</h3>
+          </div>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            <strong>Our Fix:</strong> Applies Empirical Bayes shrinkage (<code class="text-amber-300">κ = 1.45</code>) comparing live non-TD opportunity rate (targets, carries, pass attempts, tackles, snap counts) to expected pace; adjusts remaining pass/rush volume for live score differential; models higher scoring density in Q2/Q4 two-minute drills + overtime probability; and adds live possession & Red Zone expected drive points.
+          </p>
+        </div>
+
+        <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-6 space-y-3">
+          <div class="flex items-center gap-2 text-purple-300 font-bold text-base">
+            <span class="px-2 py-0.5 rounded bg-purple-400/20 text-xs font-mono-num">4</span>
+            <h3>Auto-Updating Weeks, Lineup Changes & Smart BYE Auto-Sub</h3>
+          </div>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            Automatically detects the active NFL week from <code class="text-purple-300">api.sleeper.app/v1/state/nfl</code>, picks up live starter/bench swaps every 10 seconds, and includes a <strong>Smart Auto-Sub BYE/OUT</strong> mode so future-week median & H2H forecasts aren't distorted before managers swap out bye-week players.
+          </p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const activeLeagueId = urlParams.get('league') || window.SleeperTrackerEngine.DEFAULT_LEAGUE_ID;
+
+    let currentState = null;
+    let selectedWeek = urlParams.get('week') ? Number(urlParams.get('week')) : null;
+    let lastKnownNflWeek = null;
+    let selectedMatchupId = 5;
+    let showSleeperComparison = true;
+    let autoSubByeOut = false;
+    let showBench = true;
+    let countdownSec = 10;
+
+    // Track previous starters & scores to detect real-time lineup changes & scoring plays
+    let previousScores = {};
+    let previousStartersByRoster = {};
+    let activityLog = [];
+
+    function switchTab(tabName) {
+      ['matchups', 'median', 'activity', 'model'].forEach((t) => {
+        const content = document.getElementById(`tab-content-${t}`);
+        const btn = document.getElementById(`tab-btn-${t}`);
+        if (!content || !btn) return;
+        if (t === tabName) {
+          content.classList.remove('hidden');
+          btn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[#00ceb8] text-slate-950 shadow flex items-center gap-1.5';
+        } else {
+          content.classList.add('hidden');
+          btn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white flex items-center gap-1.5';
+        }
+      });
+    }
+
+    function updateAutoSubButtonUI() {
+      const btn = document.getElementById('autosub-toggle-btn');
+      const lbl = document.getElementById('autosub-state-label');
+      if (autoSubByeOut) {
+        btn.className = 'px-3 py-1.5 rounded-xl text-xs font-semibold border border-amber-400/60 bg-amber-500/20 text-amber-300 transition flex items-center gap-1.5';
+        lbl.textContent = 'ON';
+        lbl.className = 'font-bold text-white';
+      } else {
+        btn.className = 'px-3 py-1.5 rounded-xl text-xs font-semibold border border-[#2b354b] bg-[#1a2130] text-slate-300 hover:border-amber-400/50 transition flex items-center gap-1.5';
+        lbl.textContent = 'OFF';
+        lbl.className = 'font-bold text-slate-400';
+      }
+    }
+
+    function toggleAutoSubMode() {
+      autoSubByeOut = !autoSubByeOut;
+      updateAutoSubButtonUI();
+      fetchLiveState(false);
+    }
+
+    function toggleComparisonMode() {
+      showSleeperComparison = !showSleeperComparison;
+      document.getElementById('compare-state-label').textContent = showSleeperComparison ? 'ON' : 'OFF';
+      if (currentState) renderAll(currentState);
+    }
+
+    function populateWeekDropdown(currentNflWeek, activeWeek) {
+      const sel = document.getElementById('week-select');
+      const weeks = [];
+      for (let w = 1; w <= 18; w++) {
+        const isLive = w === currentNflWeek;
+        const label = isLive ? `${w} (Live)` : (w >= 14 ? `${w} (Playoffs)` : `${w}`);
+        weeks.push(`<option value="${w}" ${w === activeWeek ? 'selected' : ''}>${label}</option>`);
+      }
+      sel.innerHTML = weeks.join('');
+    }
+
+    function onWeekChange() {
+      const newWeek = Number(document.getElementById('week-select').value);
+      selectedWeek = newWeek;
+      // Automatically turn on Smart BYE/OUT Auto-Sub when looking at future weeks
+      if (lastKnownNflWeek && newWeek > lastKnownNflWeek && !autoSubByeOut) {
+        autoSubByeOut = true;
+        updateAutoSubButtonUI();
+      } else if (lastKnownNflWeek && newWeek <= lastKnownNflWeek && autoSubByeOut) {
+        autoSubByeOut = false;
+        updateAutoSubButtonUI();
+      }
+      fetchLiveState(true);
+    }
+
+    function selectMatchup(matchupId) {
+      selectedMatchupId = matchupId;
+      if (currentState) {
+        renderMatchupCards(currentState);
+        renderSelectedMatchupDetail(currentState);
+      }
+    }
+
+    /**
+     * Interactive What-If Bench Swap: swap a bench player into a compatible starter slot in 12ms!
+     */
+    function performWhatIfSwap(rosterId, benchPlayerId, starterIdx) {
+      if (!currentState || !currentState.rostersData) return;
+      const r = currentState.rostersData.find((x) => x.rosterId === rosterId);
+      if (!r) return;
+      const bIdx = r.bench.findIndex((p) => p.playerId === String(benchPlayerId));
+      if (bIdx < 0 || !r.starters[starterIdx]) return;
+
+      const oldStarter = { ...r.starters[starterIdx] };
+      const newStarter = { ...r.bench[bIdx] };
+      const targetSlot = oldStarter.slot;
+
+      if (!window.SleeperTrackerEngine.isEligibleForSlot(newStarter, targetSlot)) {
+        alert(`${newStarter.fullName} (${newStarter.position}) is not eligible for the ${targetSlot} slot.`);
+        return;
+      }
+
+      newStarter.slot = targetSlot;
+      newStarter.autoSubFor = `What-If Swap for ${oldStarter.shortName}`;
+      oldStarter.slot = 'BN';
+      oldStarter.autoSubFor = null;
+
+      r.starters[starterIdx] = newStarter;
+      r.bench[bIdx] = oldStarter;
+
+      currentState = window.SleeperTrackerEngine.recomputeLeagueFromRosters(currentState, currentState.rostersData);
+      renderAll(currentState);
+    }
+
+    function formatSigned(val, decimals = 2) {
+      const n = Number(val);
+      if (Number.isNaN(n)) return '0.00';
+      return (n >= 0 ? '+' : '') + n.toFixed(decimals);
+    }
+
+    function formatPct(prob) {
+      const p = Number(prob) * 100;
+      if (p >= 99.5 && p < 100) return '99.9%';
+      if (p <= 0.5 && p > 0) return '0.1%';
+      return p.toFixed(1) + '%';
+    }
+
+    function detectChangesAndLog(data) {
+      const nowStr = new Date().toLocaleTimeString();
+      for (const m of data.matchups) {
+        for (const t of [m.teamA, m.teamB]) {
+          if (!t) continue;
+          const rid = t.rosterId;
+          // 1. Check for starter swaps in Sleeper
+          const rawStarterIds = (t.rawStarters || t.starters).map((p) => p.playerId);
+          const prevIds = previousStartersByRoster[rid];
+          if (prevIds && prevIds.length === rawStarterIds.length) {
+            for (let i = 0; i < rawStarterIds.length; i++) {
+              if (prevIds[i] !== rawStarterIds[i]) {
+                const newP = (t.rawStarters || t.starters)[i];
+                activityLog.unshift({
+                  time: nowStr,
+                  type: 'lineup',
+                  teamName: t.teamName,
+                  text: `Lineup Change (${newP.slot}): Started ${newP.fullName} (${newP.team} ${newP.position})`
+                });
+              }
+            }
+          }
+          previousStartersByRoster[rid] = rawStarterIds;
+
+          // 2. Check for live point changes
+          const prevPts = previousScores[rid];
+          if (prevPts !== undefined && Math.abs(t.currentPts - prevPts) >= 0.01) {
+            const diff = t.currentPts - prevPts;
+            activityLog.unshift({
+              time: nowStr,
+              type: 'score',
+              teamName: t.teamName,
+              diff,
+              text: `${t.teamName} ${formatSigned(diff)} pts → ${t.currentPts.toFixed(2)} pts (H2H Win: ${formatPct(t.simulation.h2hWinProbImproved)}, Med Win: ${formatPct(t.simulation.medianWinProbImproved)})`
+            });
+          }
+        }
+      }
+      if (activityLog.length > 100) activityLog.length = 100;
+      document.getElementById('activity-count-badge').textContent = String(activityLog.length);
+      renderActivityLog();
+    }
+
+    function renderActivityLog() {
+      const container = document.getElementById('activity-log-list');
+      if (!activityLog.length) {
+        container.innerHTML = `<div class="text-xs text-slate-400 py-4 text-center">Monitoring live Sleeper lineup swaps and scoring plays every 10 seconds...</div>`;
+        return;
+      }
+      container.innerHTML = activityLog.map((item) => {
+        const isLineup = item.type === 'lineup';
+        return `
+          <div class="flex items-center justify-between px-3 py-2 rounded-xl bg-[#121722] border ${isLineup ? 'border-amber-400/40' : 'border-[#263147]'} text-xs">
+            <div class="flex items-center gap-2">
+              <span class="px-1.5 py-0.5 rounded font-bold ${isLineup ? 'bg-amber-500/20 text-amber-300' : (item.diff > 0 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300')}">
+                ${isLineup ? 'LINEUP SWAP' : formatSigned(item.diff)}
+              </span>
+              <span class="text-slate-200">${item.text}</span>
+            </div>
+            <span class="text-slate-500 font-mono-num shrink-0 ml-2">${item.time}</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderNflTicker(nflGames) {
+      const container = document.getElementById('nfl-ticker');
+      if (!nflGames || !nflGames.length) {
+        container.innerHTML = '<span class="text-xs text-slate-500">No NFL games found for this week</span>';
+        return;
+      }
+
+      const order = { in_game: 0, pre_game: 1, complete: 2 };
+      const sorted = [...nflGames].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3));
+
+      container.innerHTML = sorted.map((g) => {
+        const isLive = g.status === 'in_game';
+        const isPre = g.status === 'pre_game';
+        const borderCls = isLive
+          ? (g.redZone ? 'border-rose-500/60 bg-rose-950/25' : 'border-[#00ceb8]/50 bg-[#1a2436]')
+          : 'border-[#263044] bg-[#181f2e]/70';
+
+        let statusBadge = '';
+        if (isLive) {
+          statusBadge = `<span class="text-xs font-bold text-[#00ceb8] flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-[#00ceb8] live-dot"></span>
+            Q${g.quarter} ${g.clock}
+          </span>`;
+        } else if (isPre) {
+          statusBadge = `<span class="text-xs text-amber-300 font-medium">${g.clock}</span>`;
+        } else {
+          statusBadge = `<span class="text-xs text-slate-400 font-medium">FINAL</span>`;
+        }
+
+        const rzBadge = g.redZone
+          ? `<span class="px-1.5 py-0.5 text-xs font-bold rounded bg-rose-500/25 text-rose-300 border border-rose-500/40">RZ: ${g.redZone}</span>`
+          : '';
+
+        const awayPoss = isLive && g.possession === g.awayTeam ? '🏈' : '';
+        const homePoss = isLive && g.possession === g.homeTeam ? '🏈' : '';
+
+        return `
+          <div class="px-3 py-1.5 rounded-xl border ${borderCls} flex items-center gap-3 text-xs shrink-0">
+            <div class="flex items-center gap-2 font-mono-num">
+              <span class="${g.possession === g.awayTeam ? 'text-white font-bold' : 'text-slate-300'}">${g.awayTeam}${awayPoss}</span>
+              ${!isPre ? `<span class="font-bold text-white">${g.awayScore}</span>` : ''}
+              <span class="text-slate-500">@</span>
+              <span class="${g.possession === g.homeTeam ? 'text-white font-bold' : 'text-slate-300'}">${g.homeTeam}${homePoss}</span>
+              ${!isPre ? `<span class="font-bold text-white">${g.homeScore}</span>` : ''}
+            </div>
+            <div class="border-l border-[#2d3850] pl-2 flex items-center gap-1.5">
+              ${statusBadge}
+              ${rzBadge}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderTopMedianBanner(data) {
+      const med = data.leagueMedian;
+      document.getElementById('banner-imp-median').textContent = med.expectedMedianImproved.toFixed(2);
+      document.getElementById('banner-slp-median').textContent = med.staticMedianSleeper.toFixed(2);
+      document.getElementById('table-target-median').textContent = med.expectedMedianImproved.toFixed(2);
+
+      const diff = med.medianDiffVsSleeper;
+      const deltaEl = document.getElementById('banner-med-delta');
+      deltaEl.textContent = `${formatSigned(diff)} vs Sleeper`;
+      deltaEl.className = `text-xs font-bold font-mono-num px-1.5 py-0.5 rounded ${
+        Math.abs(diff) >= 1.5 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-[#00ceb8]/15 text-[#00ceb8]'
+      }`;
+
+      document.getElementById('banner-med-ci').textContent =
+        `80% CI: ${med.p10.toFixed(1)} – ${med.p90.toFixed(1)} (IQR: ${med.p25.toFixed(1)} – ${med.p75.toFixed(1)})`;
+
+      const lb = data.medianLeaderboard;
+      const t5 = lb[4];
+      const t6 = lb[5];
+
+      if (t5 && t6) {
+        const t5MedWin = (t5.simulation.medianWinProbImproved * 100).toFixed(1);
+        const t6MedWin = (t6.simulation.medianWinProbImproved * 100).toFixed(1);
+        document.getElementById('banner-insight-text').innerHTML = `
+          Currently <strong>#5 ${t5.teamName}</strong> projects for <span class="font-mono-num text-white font-semibold">${t5.improvedTotalProj.toFixed(2)}</span>
+          and <strong>#6 ${t6.teamName}</strong> projects for <span class="font-mono-num text-white font-semibold">${t6.improvedTotalProj.toFixed(2)}</span>.
+          Sleeper averages #5 & #6 (<span class="font-mono-num">${med.staticMedianSleeper.toFixed(2)}</span>),
+          Whereas our 10,000-trial joint order-statistic simulation yields an expected Top-5 cutoff of
+          <strong class="text-[#00ceb8] font-mono-num">${med.expectedMedianImproved.toFixed(2)}</strong>—giving
+          <strong>${t5.teamName}</strong> a <strong class="text-amber-300 font-mono-num">${t5MedWin}%</strong> Median Win chance vs
+          <strong class="font-mono-num">${t6MedWin}%</strong> for <strong>${t6.teamName}</strong>.
+        `;
+      }
+
+      const bubbleTeams = lb.slice(3, 7);
+      document.getElementById('banner-bubble-list').innerHTML = bubbleTeams.map((t) => {
+        const isCutoff = t.rank === 5;
+        return `
+          <div class="flex items-center justify-between text-xs px-2 py-1 rounded ${
+            t.rank <= 5 ? 'bg-emerald-950/30 border border-emerald-500/20' : 'bg-rose-950/20 border border-rose-500/15'
+          }">
+            <div class="flex items-center gap-1.5 truncate pr-2">
+              <span class="font-mono-num font-bold ${t.rank <= 5 ? 'text-[#00ceb8]' : 'text-rose-400'}">#${t.rank}</span>
+              <span class="text-slate-200 font-medium truncate">${t.teamName}</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0 font-mono-num">
+              <span class="text-slate-300">${t.improvedTotalProj.toFixed(1)}</span>
+              <span class="px-1.5 py-0.5 rounded font-bold ${
+                t.simulation.medianWinProbImproved >= 0.5
+                  ? 'bg-[#00ceb8]/20 text-[#00ceb8]'
+                  : 'bg-slate-800 text-slate-300'
+              }">${formatPct(t.simulation.medianWinProbImproved)}</span>
+            </div>
+          </div>
+          ${isCutoff ? '<div class="border-t border-dashed border-amber-400/50 my-0.5"></div>' : ''}
+        `;
+      }).join('');
+    }
+
+    function renderMatchupCards(data) {
+      const container = document.getElementById('matchups-list');
+      document.getElementById('matchups-col-heading').textContent =
+        `Week ${data.league.week} Matchups ${data.autoSubByeOut ? '(⚡ Smart Auto-Sub Active)' : ''}`;
+
+      container.innerHTML = data.matchups.map((m) => {
+        const a = m.teamA;
+        const b = m.teamB;
+        const isSelected = m.matchupId === selectedMatchupId;
+
+        const aWinImp = a.simulation.h2hWinProbImproved;
+        const bWinImp = b.simulation.h2hWinProbImproved;
+        const aWinSlp = a.simulation.h2hWinProbSleeper;
+        const bWinSlp = b.simulation.h2hWinProbSleeper;
+
+        const aWinDiff = (aWinImp - aWinSlp) * 100;
+        const bWinDiff = (bWinImp - bWinSlp) * 100;
+
+        const aScoreChanged = previousScores[a.rosterId] !== undefined && previousScores[a.rosterId] !== a.currentPts;
+        const bScoreChanged = previousScores[b.rosterId] !== undefined && previousScores[b.rosterId] !== b.currentPts;
+
+        const renderTeamAlert = (t) => {
+          if (t.autoSubCount > 0) {
+            return `<span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-xs font-semibold">⚡ ${t.autoSubCount} Auto-Sub</span>`;
+          }
+          if (t.playersOnByeOrOut > 0) {
+            return `<span class="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-xs font-semibold">⚠️ ${t.playersOnByeOrOut} BYE/OUT</span>`;
+          }
+          return '';
+        };
+
+        return `
+          <div onclick="selectMatchup(${m.matchupId})"
+               class="cursor-pointer rounded-2xl p-4 transition-all border ${
+                 isSelected
+                   ? 'bg-[#21293c] border-[#00ceb8] shadow-lg shadow-[#00ceb8]/10'
+                   : 'bg-[#171c28] border-[#2b354b] hover:bg-[#1d2433] hover:border-[#3b4866]'
+               }">
+            <div class="flex items-center justify-between text-xs mb-2">
+              <div class="flex items-center gap-2">
+                <span class="font-bold font-mono-num text-[#00ceb8]">${formatPct(aWinImp)}</span>
+                ${showSleeperComparison && Math.abs(aWinDiff) >= 0.4 ? `
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-[#3b82f6]/15 text-[#60a5fa] font-mono-num">
+                    ${formatSigned(aWinDiff, 1)}% vs Slp
+                  </span>
+                ` : ''}
+              </div>
+              <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Matchup ${m.matchupId} • H2H Win Prob</span>
+              <div class="flex items-center gap-2">
+                ${showSleeperComparison && Math.abs(bWinDiff) >= 0.4 ? `
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-[#3b82f6]/15 text-[#60a5fa] font-mono-num">
+                    ${formatSigned(bWinDiff, 1)}% vs Slp
+                  </span>
+                ` : ''}
+                <span class="font-bold font-mono-num text-purple-400">${formatPct(bWinImp)}</span>
+              </div>
+            </div>
+
+            <div class="w-full h-2 rounded-full bg-[#10141d] overflow-hidden flex mb-3.5 p-0.5 border border-[#2b354b]">
+              <div style="width: ${(aWinImp * 100).toFixed(1)}%" class="h-full bg-gradient-to-r from-[#00ceb8] to-[#2dd4bf] rounded-l-full transition-all duration-500"></div>
+              <div style="width: ${(bWinImp * 100).toFixed(1)}%" class="h-full bg-gradient-to-l from-purple-500 to-indigo-400 rounded-r-full transition-all duration-500"></div>
+            </div>
+
+            <!-- Team A -->
+            <div class="flex items-center justify-between py-1.5 px-2 rounded-xl ${aScoreChanged ? 'score-updated' : ''}">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <img src="${a.avatarUrl || 'https://sleepercdn.com/images/v2/icons/player_default.webp'}"
+                     onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
+                     class="w-9 h-9 rounded-full object-cover border border-[#36425c] shrink-0" />
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="font-bold text-sm text-white truncate">${a.teamName}</span>
+                    <span class="text-xs text-slate-400 font-mono-num">(${a.wins}-${a.losses})</span>
+                    ${renderTeamAlert(a)}
+                  </div>
+                  <div class="flex items-center gap-2 text-xs text-slate-400 flex-wrap">
+                    <span>@${a.ownerName}</span>
+                    <span>•</span>
+                    <span class="text-slate-300">${a.playersInProgress} live, ${a.playersYetToPlay} left</span>
+                    <span>•</span>
+                    <span class="px-1.5 py-0.5 rounded text-xs font-mono-num ${
+                      a.simulation.medianWinProbImproved >= 0.5 ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-800 text-slate-400'
+                    }">Med: ${formatPct(a.simulation.medianWinProbImproved)}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="text-right shrink-0 ml-2">
+                <div class="text-lg font-extrabold font-mono-num text-white leading-tight">${a.currentPts.toFixed(2)}</div>
+                <div class="text-xs font-mono-num text-[#00ceb8] font-semibold">
+                  Proj: ${a.improvedTotalProj.toFixed(2)}
+                  ${showSleeperComparison ? `<span class="text-slate-400 font-normal">(Slp ${a.sleeperTotalProj.toFixed(1)})</span>` : ''}
+                </div>
+              </div>
+            </div>
+
+            <div class="border-t border-[#283246] my-1.5"></div>
+
+            <!-- Team B -->
+            <div class="flex items-center justify-between py-1.5 px-2 rounded-xl ${bScoreChanged ? 'score-updated' : ''}">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <img src="${b.avatarUrl || 'https://sleepercdn.com/images/v2/icons/player_default.webp'}"
+                     onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
+                     class="w-9 h-9 rounded-full object-cover border border-[#36425c] shrink-0" />
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="font-bold text-sm text-white truncate">${b.teamName}</span>
+                    <span class="text-xs text-slate-400 font-mono-num">(${b.wins}-${b.losses})</span>
+                    ${renderTeamAlert(b)}
+                  </div>
+                  <div class="flex items-center gap-2 text-xs text-slate-400 flex-wrap">
+                    <span>@${b.ownerName}</span>
+                    <span>•</span>
+                    <span class="text-slate-300">${b.playersInProgress} live, ${b.playersYetToPlay} left</span>
+                    <span>•</span>
+                    <span class="px-1.5 py-0.5 rounded text-xs font-mono-num ${
+                      b.simulation.medianWinProbImproved >= 0.5 ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-800 text-slate-400'
+                    }">Med: ${formatPct(b.simulation.medianWinProbImproved)}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="text-right shrink-0 ml-2">
+                <div class="text-lg font-extrabold font-mono-num text-white leading-tight">${b.currentPts.toFixed(2)}</div>
+                <div class="text-xs font-mono-num text-purple-300 font-semibold">
+                  Proj: ${b.improvedTotalProj.toFixed(2)}
+                  ${showSleeperComparison ? `<span class="text-slate-400 font-normal">(Slp ${b.sleeperTotalProj.toFixed(1)})</span>` : ''}
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderPlayerCell(p, side, rosterObj = null, isBench = false) {
+      const isLeft = side === 'left';
+      const isLive = p.gameStatus === 'in_game';
+      const isPre = p.gameStatus === 'pre_game';
+      const isBye = p.gameStatus === 'bye';
+      const projDiff = p.improvedProj - p.sleeperProj;
+
+      let gameTag = '';
+      if (isBye) {
+        gameTag = `<span class="text-xs font-bold text-rose-400">BYE WEEK</span>`;
+      } else if (isLive) {
+        gameTag = `<span class="text-xs font-semibold text-[#00ceb8]">Q${p.quarter} ${p.clock} • ${p.gameScore}</span>`;
+      } else if (isPre) {
+        gameTag = `<span class="text-xs text-amber-300/90">${p.clock} • ${p.gameScore}</span>`;
+      } else {
+        gameTag = `<span class="text-xs text-slate-500">FINAL</span>`;
+      }
+
+      const badges = [];
+      if (p.autoSubFor) {
+        badges.push(`<span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-400/40">⚡ Sub for ${p.autoSubFor}</span>`);
+      }
+      if (p.inRedZone) {
+        badges.push(`<span class="px-1.5 py-0.5 rounded text-xs font-bold bg-rose-500/25 text-rose-300 border border-rose-500/40">RED ZONE</span>`);
+      } else if (p.hasPossession) {
+        badges.push(`<span class="px-1.5 py-0.5 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-300">🏈 POSS</span>`);
+      }
+      if (p.factors?.reasons?.length) {
+        for (const r of p.factors.reasons) {
+          if (r !== 'Live in Red Zone' && r !== 'Has possession') {
+            const isWarning = r.includes('BYE') || r.includes('Status:') || r.includes('0 snaps');
+            badges.push(`<span class="px-1.5 py-0.5 rounded text-xs ${isWarning ? 'bg-rose-500/20 text-rose-300' : 'bg-[#253047] text-sky-300'}">${r}</span>`);
+          }
+        }
+      }
+
+      // If bench player, build quick "What-If Swap into Slot" dropdown
+      let swapControl = '';
+      if (isBench && rosterObj) {
+        const eligibleSlots = [];
+        rosterObj.starters.forEach((st, sIdx) => {
+          if (window.SleeperTrackerEngine.isEligibleForSlot(p, st.slot)) {
+            eligibleSlots.push(`<option value="${sIdx}">Swap w/ ${st.slot}: ${st.shortName} (${st.improvedProj.toFixed(1)})</option>`);
+          }
+        });
+        if (eligibleSlots.length) {
+          swapControl = `
+            <select onchange="if(this.value !== '') { performWhatIfSwap(${rosterObj.rosterId}, '${p.playerId}', Number(this.value)); this.value=''; }"
+                    class="mt-1 bg-[#1a2234] border border-[#33415c] text-xs text-slate-300 rounded px-1.5 py-0.5 focus:outline-none hover:border-[#00ceb8]">
+              <option value="">⇄ Test What-If Lineup Swap...</option>
+              ${eligibleSlots.join('')}
+            </select>
+          `;
+        }
+      }
+
+      const avatarImg = `
+        <div class="relative shrink-0">
+          <img src="https://sleepercdn.com/content/nfl/players/thumb/${p.playerId}.jpg"
+               onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
+               class="w-10 h-10 rounded-full object-cover bg-[#10141d] border ${
+                 isLive ? 'border-[#00ceb8]' : (isBye ? 'border-rose-500/50 opacity-60' : 'border-[#2f3b52]')
+               }" />
+          ${isLive ? `<span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#00ceb8] ring-2 ring-[#171c28] live-dot"></span>` : ''}
+        </div>
+      `;
+
+      const scoreBlock = `
+        <div class="${isLeft ? 'text-right' : 'text-left'} shrink-0 min-w-[78px]">
+          <div class="text-sm font-extrabold font-mono-num ${isBye ? 'text-rose-400' : 'text-white'}">${p.currentPts.toFixed(2)}</div>
+          <div class="text-xs font-mono-num ${isLive || isPre ? 'text-[#00ceb8] font-semibold' : 'text-slate-500'}">
+            ${p.improvedProj.toFixed(2)}
+            ${showSleeperComparison && Math.abs(projDiff) >= 0.15 ? `<span class="${projDiff > 0 ? 'text-emerald-400' : 'text-rose-400'}">(${formatSigned(projDiff, 1)})</span>` : ''}
+          </div>
+          ${(isLive || isPre) && p.remSdImproved > 0 ? `
+            <div class="text-xs font-mono-num text-slate-500">±${p.remSdImproved.toFixed(1)} SD</div>
+          ` : ''}
+        </div>
+      `;
+
+      const infoBlock = `
+        <div class="min-w-0 flex-1 ${isLeft ? 'text-left' : 'text-right'}">
+          <div class="flex items-center gap-1.5 ${isLeft ? 'justify-start' : 'justify-end'}">
+            <span class="font-semibold text-xs sm:text-sm text-slate-100 truncate">${p.fullName}</span>
+            ${p.injuryStatus ? `<span class="text-xs font-bold px-1 rounded bg-amber-500/20 text-amber-400">${p.injuryStatus}</span>` : ''}
+          </div>
+          <div class="text-xs text-slate-400 flex items-center gap-1.5 flex-wrap ${isLeft ? 'justify-start' : 'justify-end'}">
+            <span class="font-semibold text-slate-300">${p.team} • ${p.position}</span>
+            <span>•</span>
+            ${gameTag}
+          </div>
+          ${badges.length ? `<div class="mt-1 flex flex-wrap gap-1 ${isLeft ? 'justify-start' : 'justify-end'}">${badges.join('')}</div>` : ''}
+          ${swapControl}
+        </div>
+      `;
+
+      return `
+        <div class="flex items-center justify-between gap-2.5 p-2.5 rounded-xl bg-[#131823]/70 border ${
+          p.autoSubFor ? 'border-amber-400/50 bg-amber-950/10' : (isBye ? 'border-rose-500/35 bg-rose-950/10' : 'border-[#242e42]')
+        }">
+          ${isLeft ? `${avatarImg}${infoBlock}${scoreBlock}` : `${scoreBlock}${infoBlock}${avatarImg}`}
+        </div>
+      `;
+    }
+
+    function renderSelectedMatchupDetail(data) {
+      const container = document.getElementById('selected-matchup-detail');
+      const m = data.matchups.find((x) => x.matchupId === selectedMatchupId) || data.matchups[0];
+      if (!m) return;
+
+      const a = m.teamA;
+      const b = m.teamB;
+      const slots = data.league.starterSlots || [];
+
+      const rowsHtml = slots.map((slot, idx) => {
+        const pA = a.starters[idx];
+        const pB = b.starters[idx];
+        const slotLabel = slot === 'SUPER_FLEX' ? 'SFLEX' : (slot === 'IDP_FLEX' ? 'IDP' : slot);
+        return `
+          <div class="grid grid-cols-12 gap-2 items-center py-1">
+            <div class="col-span-5">${pA ? renderPlayerCell(pA, 'left', a, false) : ''}</div>
+            <div class="col-span-2 flex justify-center">
+              <span class="px-2.5 py-1 rounded-lg text-xs font-extrabold tracking-wider pos-${slot}">
+                ${slotLabel}
+              </span>
+            </div>
+            <div class="col-span-5">${pB ? renderPlayerCell(pB, 'right', b, false) : ''}</div>
+          </div>
+        `;
+      }).join('');
+
+      let benchHtml = '';
+      if (showBench) {
+        const maxBench = Math.max(a.bench.length, b.bench.length);
+        const benchRows = [];
+        for (let i = 0; i < maxBench; i++) {
+          const pA = a.bench[i];
+          const pB = b.bench[i];
+          benchRows.push(`
+            <div class="grid grid-cols-12 gap-2 items-center py-1 opacity-90">
+              <div class="col-span-5">${pA ? renderPlayerCell(pA, 'left', a, true) : ''}</div>
+              <div class="col-span-2 flex justify-center">
+                <span class="px-2 py-1 rounded-lg text-xs font-bold bg-slate-800 text-slate-400 border border-slate-700">BN</span>
+              </div>
+              <div class="col-span-5">${pB ? renderPlayerCell(pB, 'right', b, true) : ''}</div>
+            </div>
+          `);
+        }
+        benchHtml = `
+          <div class="mt-4 pt-4 border-t border-[#2b354b] space-y-1.5">
+            <div class="text-xs font-semibold text-slate-400 px-2 mb-2 flex items-center justify-between">
+              <span>BENCH (Use "⇄ Test What-If Lineup Swap" on any bench player to simulate lineup changes!)</span>
+              <button onclick="fetchLiveState(true)" class="text-amber-300 hover:underline">Reset to Live Sleeper Lineups</button>
+            </div>
+            ${benchRows.join('')}
+          </div>
+        `;
+      }
+
+      container.innerHTML = `
+        <div class="bg-gradient-to-b from-[#1e2638] to-[#171c28] p-5 border-b border-[#2b354b]">
+          <div class="grid grid-cols-12 gap-3 items-center">
+            <!-- Team A Summary -->
+            <div class="col-span-5">
+              <div class="flex items-center gap-3">
+                <img src="${a.avatarUrl || 'https://sleepercdn.com/images/v2/icons/player_default.webp'}"
+                     onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
+                     class="w-12 h-12 rounded-full border-2 border-[#00ceb8]" />
+                <div class="min-w-0">
+                  <h3 class="font-extrabold text-base text-white truncate">${a.teamName}</h3>
+                  <p class="text-xs text-slate-400">@${a.ownerName} • ${a.wins}-${a.losses}</p>
+                </div>
+              </div>
+              <div class="mt-3 flex items-baseline gap-3">
+                <span class="text-3xl font-extrabold font-mono-num text-white">${a.currentPts.toFixed(2)}</span>
+                <div class="text-xs font-mono-num">
+                  <div class="text-[#00ceb8] font-bold">Imp Proj: ${a.improvedTotalProj.toFixed(2)}</div>
+                  <div class="text-slate-400">Sleeper Proj: ${a.sleeperTotalProj.toFixed(2)} (${formatSigned(a.projDeltaVsSleeper)})</div>
+                </div>
+              </div>
+              <div class="mt-2 flex flex-wrap gap-1.5 text-xs font-mono-num">
+                <span class="px-2 py-0.5 rounded bg-[#00ceb8]/15 text-[#00ceb8] font-semibold">
+                  H2H Win: ${formatPct(a.simulation.h2hWinProbImproved)}
+                </span>
+                <span class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-semibold">
+                  Med Win: ${formatPct(a.simulation.medianWinProbImproved)}
+                </span>
+                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                  80% Range: ${a.simulation.p10.toFixed(1)}–${a.simulation.p90.toFixed(1)}
+                </span>
+              </div>
+            </div>
+
+            <!-- Center VS -->
+            <div class="col-span-2 text-center">
+              <div class="inline-flex flex-col items-center px-3 py-2 rounded-xl bg-[#111622] border border-[#2b354b]">
+                <span class="text-xs font-extrabold text-slate-400">WEEK ${data.league.week}</span>
+                <span class="text-xs text-[#00ceb8] font-mono-num font-bold mt-1">Med: ${data.leagueMedian.expectedMedianImproved.toFixed(1)}</span>
+              </div>
+            </div>
+
+            <!-- Team B Summary -->
+            <div class="col-span-5 text-right">
+              <div class="flex items-center justify-end gap-3">
+                <div class="min-w-0">
+                  <h3 class="font-extrabold text-base text-white truncate">${b.teamName}</h3>
+                  <p class="text-xs text-slate-400">@${b.ownerName} • ${b.wins}-${b.losses}</p>
+                </div>
+                <img src="${b.avatarUrl || 'https://sleepercdn.com/images/v2/icons/player_default.webp'}"
+                     onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
+                     class="w-12 h-12 rounded-full border-2 border-purple-400" />
+              </div>
+              <div class="mt-3 flex items-baseline justify-end gap-3">
+                <div class="text-xs font-mono-num text-right">
+                  <div class="text-purple-300 font-bold">Imp Proj: ${b.improvedTotalProj.toFixed(2)}</div>
+                  <div class="text-slate-400">Sleeper Proj: ${b.sleeperTotalProj.toFixed(2)} (${formatSigned(b.projDeltaVsSleeper)})</div>
+                </div>
+                <span class="text-3xl font-extrabold font-mono-num text-white">${b.currentPts.toFixed(2)}</span>
+              </div>
+              <div class="mt-2 flex flex-wrap justify-end gap-1.5 text-xs font-mono-num">
+                <span class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold">
+                  H2H Win: ${formatPct(b.simulation.h2hWinProbImproved)}
+                </span>
+                <span class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-semibold">
+                  Med Win: ${formatPct(b.simulation.medianWinProbImproved)}
+                </span>
+                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                  80% Range: ${b.simulation.p10.toFixed(1)}–${b.simulation.p90.toFixed(1)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-4 pt-3 border-t border-[#2b354b] flex flex-wrap items-center justify-between gap-2 text-xs font-mono-num">
+            <div class="flex items-center gap-2">
+              <span class="text-slate-400">Weekly Outcome Prob:</span>
+              <span class="text-emerald-300">2-0: ${formatPct(a.simulation.prob2_0)}</span>
+              <span class="text-amber-300">1-1: ${formatPct(a.simulation.prob1_1)}</span>
+              <span class="text-rose-300">0-2: ${formatPct(a.simulation.prob0_2)}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-emerald-300">2-0: ${formatPct(b.simulation.prob2_0)}</span>
+              <span class="text-amber-300">1-1: ${formatPct(b.simulation.prob1_1)}</span>
+              <span class="text-rose-300">0-2: ${formatPct(b.simulation.prob0_2)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-4 space-y-1.5">
+          <div class="flex items-center justify-between text-xs text-slate-400 px-2 pb-1">
+            <span>STARTERS (Current / Improved Proj)</span>
+            <button onclick="showBench = !showBench; renderSelectedMatchupDetail(currentState);" class="text-[#00ceb8] hover:underline font-semibold">
+              ${showBench ? 'Hide Bench ▲' : 'Show Bench & What-If Swaps ▼'}
+            </button>
+          </div>
+          ${rowsHtml}
+          ${benchHtml}
+        </div>
+      `;
+    }
+
+    function renderMedianTab(data) {
+      const lb = data.medianLeaderboard;
+      const med = data.leagueMedian;
+      const tbody = document.getElementById('median-leaderboard-tbody');
+
+      const minScore = Math.min(...lb.map((r) => r.simulation.p10), 80);
+      const maxScore = Math.max(...lb.map((r) => r.simulation.p90), 210);
+      const span = Math.max(10, maxScore - minScore);
+      const medLinePct = Math.min(100, Math.max(0, ((med.expectedMedianImproved - minScore) / span) * 100));
+
+      tbody.innerHTML = lb.map((r) => {
+        const sim = r.simulation;
+        const leftPct = Math.max(0, ((sim.p10 - minScore) / span) * 100);
+        const widthPct = Math.max(2, ((sim.p90 - sim.p10) / span) * 100);
+        const meanPct = Math.min(100, Math.max(0, ((r.improvedTotalProj - minScore) / span) * 100));
+        const isTop5 = r.rank <= 5;
+
+        const rowHtml = `
+          <tr class="hover:bg-[#1e2638]/70 transition">
+            <td class="py-3 px-2 font-mono-num font-bold ${isTop5 ? 'text-[#00ceb8]' : 'text-rose-400'}">
+              #${r.rank}
+            </td>
+            <td class="py-3 px-2">
+              <div class="flex items-center gap-2.5">
+                <img src="${r.avatarUrl || 'https://sleepercdn.com/images/v2/icons/player_default.webp'}"
+                     onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
+                     class="w-7 h-7 rounded-full object-cover border border-[#36425c]" />
+                <div>
+                  <div class="font-bold text-white text-xs sm:text-sm">${r.teamName}</div>
+                  <div class="text-xs text-slate-400">@${r.ownerName} (${r.record}) • ${r.playersInProgress} live, ${r.playersYetToPlay} pre</div>
+                </div>
+              </div>
+            </td>
+            <td class="py-3 px-2 text-right font-mono-num font-bold text-white">${r.currentPts.toFixed(2)}</td>
+            <td class="py-3 px-2 text-right font-mono-num font-bold text-[#00ceb8]">${r.improvedTotalProj.toFixed(2)}</td>
+            <td class="py-3 px-2 text-right font-mono-num text-xs">
+              <span class="text-slate-300">${r.sleeperTotalProj.toFixed(2)}</span>
+              <span class="${r.projDeltaVsSleeper >= 0 ? 'text-emerald-400' : 'text-rose-400'} ml-1">
+                (${formatSigned(r.projDeltaVsSleeper)})
+              </span>
+            </td>
+            <td class="py-3 px-3 min-w-[200px]">
+              <div class="relative h-5 bg-[#111622] rounded-lg border border-[#2b354b] overflow-hidden">
+                <div style="left: ${medLinePct.toFixed(1)}%" class="absolute top-0 bottom-0 w-0.5 bg-amber-400/80 z-10" title="Expected Median"></div>
+                <div style="left: ${leftPct.toFixed(1)}%; width: ${widthPct.toFixed(1)}%"
+                     class="absolute top-1 bottom-1 rounded ${isTop5 ? 'bg-[#00ceb8]/35 border border-[#00ceb8]/60' : 'bg-purple-500/30 border border-purple-400/50'}"></div>
+                <div style="left: ${meanPct.toFixed(1)}%" class="absolute top-0.5 bottom-0.5 w-1.5 -ml-0.5 rounded-full bg-white shadow"></div>
+              </div>
+              <div class="flex justify-between text-xs font-mono-num text-slate-400 mt-0.5">
+                <span>p10: ${sim.p10.toFixed(1)}</span>
+                <span>p90: ${sim.p90.toFixed(1)}</span>
+              </div>
+            </td>
+            <td class="py-3 px-2 text-right font-mono-num">
+              <span class="px-2 py-1 rounded-lg font-bold text-xs ${
+                sim.medianWinProbImproved >= 0.5
+                  ? 'bg-[#00ceb8]/20 text-[#00ceb8] border border-[#00ceb8]/30'
+                  : 'bg-rose-500/15 text-rose-300 border border-rose-500/25'
+              }">
+                ${formatPct(sim.medianWinProbImproved)}
+              </span>
+            </td>
+            <td class="py-3 px-2 text-right font-mono-num font-semibold text-slate-200">
+              ${formatPct(sim.h2hWinProbImproved)}
+            </td>
+            <td class="py-3 px-2 text-center font-mono-num text-xs text-slate-300">
+              <span class="text-emerald-300">${Math.round(sim.prob2_0 * 100)}%</span> /
+              <span class="text-amber-300">${Math.round(sim.prob1_1 * 100)}%</span> /
+              <span class="text-rose-300">${Math.round(sim.prob0_2 * 100)}%</span>
+            </td>
+          </tr>
+        `;
+
+        if (r.rank === 5) {
+          return rowHtml + `
+            <tr class="bg-amber-500/10 border-y border-amber-400/40">
+              <td colspan="9" class="py-1.5 px-3 text-center text-xs font-bold uppercase tracking-widest text-amber-300 font-mono-num">
+                ▲ Top 5 Beat League Median (Expected Cutoff: ${med.expectedMedianImproved.toFixed(2)} pts • Sleeper Static: ${med.staticMedianSleeper.toFixed(2)} pts) ▼
+              </td>
+            </tr>
+          `;
+        }
+        return rowHtml;
+      }).join('');
+
+      const hist = med.histogram || [];
+      const maxCount = Math.max(1, ...hist.map((b) => b.count));
+      document.getElementById('median-histogram-chart').innerHTML = hist.map((b) => {
+        const hPct = Math.max(4, Math.round((b.count / maxCount) * 100));
+        const isNearSleeper = b.binStart <= med.staticMedianSleeper && b.binEnd >= med.staticMedianSleeper;
+        const isNearMean = b.binStart <= med.expectedMedianImproved && b.binEnd >= med.expectedMedianImproved;
+        const barColor = isNearMean
+          ? 'bg-[#00ceb8]'
+          : (isNearSleeper ? 'bg-amber-400' : 'bg-[#3b82f6]/60 hover:bg-[#38bdf8]');
+        return `
+          <div class="flex-1 flex flex-col items-center justify-end h-full group relative">
+            <div style="height: ${hPct}%" class="w-full rounded-t ${barColor} transition-all"></div>
+            <div class="hidden group-hover:block absolute -top-7 bg-slate-900 border border-slate-700 text-white text-xs font-mono-num px-1.5 py-0.5 rounded whitespace-nowrap z-20">
+              ${b.binMid.toFixed(1)} pts (${(b.density * 100).toFixed(1)}%)
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      if (hist.length) {
+        document.getElementById('hist-min-label').textContent = hist[0].binStart.toFixed(1);
+        document.getElementById('hist-max-label').textContent = hist[hist.length - 1].binEnd.toFixed(1);
+      }
+      document.getElementById('hist-mean-label').textContent = med.expectedMedianImproved.toFixed(2);
+      document.getElementById('diag-slp-med').textContent = med.staticMedianSleeper.toFixed(2) + ' pts';
+      document.getElementById('diag-imp-static-med').textContent = med.staticMedianImproved.toFixed(2) + ' pts';
+      document.getElementById('diag-imp-mc-med').textContent = med.expectedMedianImproved.toFixed(2) + ' pts';
+      document.getElementById('diag-med-iqr').textContent = `${med.p25.toFixed(2)} – ${med.p75.toFixed(2)} pts`;
+      document.getElementById('diag-med-ci80').textContent = `${med.p10.toFixed(2)} – ${med.p90.toFixed(2)} pts`;
+    }
+
+    function renderAll(data) {
+      document.getElementById('league-name').textContent = data.league.name;
+      document.getElementById('league-id-display').textContent = data.league.leagueId;
+      document.getElementById('season-badge').textContent = `${data.league.season} • Week ${data.league.week}`;
+
+      populateWeekDropdown(data.league.currentNflWeek, data.league.week);
+      detectChangesAndLog(data);
+
+      renderNflTicker(data.nflGames);
+      renderTopMedianBanner(data);
+      renderMatchupCards(data);
+      renderSelectedMatchupDetail(data);
+      renderMedianTab(data);
+
+      for (const m of data.matchups) {
+        if (m.teamA) previousScores[m.teamA.rosterId] = m.teamA.currentPts;
+        if (m.teamB) previousScores[m.teamB.rosterId] = m.teamB.currentPts;
+      }
+    }
+
+    async function fetchLiveState(force = false) {
+      try {
+        // Runs directly in the browser via CORS against Sleeper's live APIs!
+        const data = await window.SleeperTrackerEngine.getLeagueLiveState(
+          activeLeagueId,
+          selectedWeek,
+          force,
+          autoSubByeOut
+        );
+
+        // Auto-rollover to new NFL week if the user had the live week open and Sleeper advanced the week
+        if (lastKnownNflWeek !== null && data.league.currentNflWeek !== lastKnownNflWeek && selectedWeek === lastKnownNflWeek) {
+          selectedWeek = data.league.currentNflWeek;
+          lastKnownNflWeek = data.league.currentNflWeek;
+          return fetchLiveState(true);
+        }
+
+        lastKnownNflWeek = data.league.currentNflWeek;
+        if (selectedWeek === null) {
+          selectedWeek = data.league.week;
+        }
+
+        currentState = data;
+        renderAll(data);
+        countdownSec = 10;
+      } catch (err) {
+        console.error('Failed to fetch live state directly, trying /api/live fallback:', err);
+        try {
+          const wParam = selectedWeek ? `?week=${selectedWeek}` : '';
+          const res = await fetch(`/api/live${wParam}`);
+          if (res.ok) {
+            const data = await res.json();
+            currentState = data;
+            renderAll(data);
+          }
+        } catch (_) {}
+      }
+    }
+
+    setInterval(() => {
+      countdownSec--;
+      if (countdownSec <= 0) {
+        countdownSec = 10;
+        fetchLiveState(false);
+      }
+      const el = document.getElementById('countdown-label');
+      if (el) el.textContent = `${countdownSec}s`;
+    }, 1000);
+
+    fetchLiveState(false);
+  </script>
+</body>
+</html>
