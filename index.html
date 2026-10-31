@@ -98,9 +98,13 @@
       </div>
 
       <!-- Main Navigation Tabs -->
-      <div class="flex items-center bg-[#1a2130] p-1 rounded-xl border border-[#2b354b]">
+      <div class="flex items-center bg-[#1a2130] p-1 rounded-xl border border-[#2b354b] flex-wrap">
         <button onclick="switchTab('matchups')" id="tab-btn-matchups" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[#00ceb8] text-slate-950 shadow">
           Live Matchups
+        </button>
+        <button onclick="switchTab('optimizer')" id="tab-btn-optimizer" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white flex items-center gap-1.5">
+          <span>🎯 Lineup Optimizer</span>
+          <span id="optimizer-nav-badge" class="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30 font-mono-num text-[10px]">PROPS+MC</span>
         </button>
         <button onclick="switchTab('median')" id="tab-btn-median" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white">
           Median Forecast & Race
@@ -389,6 +393,66 @@
       </div>
     </div>
 
+    <!-- TAB 5: SIMULATION-BASED LINEUP OPTIMIZER (SPORTSBOOK PROPS + PREDICTION MARKETS + CORRELATED MC) -->
+    <div id="tab-content-optimizer" class="hidden space-y-5">
+      <!-- Top Control Bar -->
+      <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-4 shadow-xl">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded bg-[#00ceb8]/20 text-[#00ceb8] text-xs font-bold font-mono-num uppercase">Sportsbook Props + Prediction Market + 10K Correlated MC</span>
+              <span id="opt-sportsbook-badge" class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-mono-num">Live Market Feed Active</span>
+            </div>
+            <h2 class="text-lg font-extrabold text-white mt-1">Matchup &amp; League Median Simulation Lineup Optimizer</h2>
+            <p class="text-xs text-slate-400">
+              Optimizes your 14-slot lineup using Sportsbook Player Props (translated to exact league scoring), CFTC Prediction Market game odds, Block-Cholesky teammate/game correlations, and 10,000 Common-Random-Numbers (CRN) simulations against your H2H opponent and the Top-5 League Median cutoff.
+            </p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2.5">
+            <div class="bg-[#121723] border border-[#2b354b] rounded-xl px-3 py-1.5">
+              <label class="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Target Roster</label>
+              <select id="opt-roster-select" onchange="onOptimizerRosterChange()" class="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer">
+                <!-- Populated dynamically, defaults to Roster 3: Hoon Lounge Hooners -->
+              </select>
+            </div>
+
+            <div class="bg-[#121723] border border-[#2b354b] rounded-xl px-3 py-1.5">
+              <label class="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Optimization Objective</label>
+              <select id="opt-objective-select" onchange="onOptimizerParamsChange()" class="bg-transparent text-xs font-bold text-[#00ceb8] focus:outline-none cursor-pointer">
+                <option value="total_wins" class="bg-[#121723] text-white">Max Expected Weekly Wins (H2H + Median)</option>
+                <option value="h2h" class="bg-[#121723] text-white">Max H2H Matchup Win Probability</option>
+                <option value="median" class="bg-[#121723] text-white">Max Top-5 League Median Win Probability</option>
+                <option value="sweep_2_0" class="bg-[#121723] text-white">Max 2-0 Weekly Sweep Probability</option>
+                <option value="points" class="bg-[#121723] text-white">Max Expected Points (Mean)</option>
+              </select>
+            </div>
+
+            <div class="bg-[#121723] border border-[#2b354b] rounded-xl px-3 py-1.5">
+              <label class="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Market vs Sleeper Weight</label>
+              <select id="opt-market-weight" onchange="onMarketWeightChange()" class="bg-transparent text-xs font-bold text-amber-300 focus:outline-none cursor-pointer">
+                <option value="0.75" class="bg-[#121723] text-white" selected>75% Market Props / 25% Sleeper (Sharp)</option>
+                <option value="1.0" class="bg-[#121723] text-white">100% Sportsbook &amp; Prediction Market</option>
+                <option value="0.5" class="bg-[#121723] text-white">50% Market / 50% Sleeper Consensus</option>
+                <option value="0.0" class="bg-[#121723] text-white">100% Sleeper Projections (Correlated MC)</option>
+              </select>
+            </div>
+
+            <button onclick="runAndRenderOptimizer(true)" class="px-3.5 py-2.5 rounded-xl bg-[#00ceb8] hover:bg-[#00b5a2] text-slate-950 font-bold text-xs shadow-lg transition flex items-center gap-1.5">
+              <span>⚡ Re-Simulate (8,000 Trials)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dynamic Optimizer Content Container -->
+      <div id="optimizer-dynamic-body" class="space-y-5">
+        <div class="p-10 text-center text-slate-400 text-sm bg-[#171c28] border border-[#2b354b] rounded-2xl">
+          Running 8,000 correlated Monte Carlo lineup simulations...
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <script>
@@ -398,11 +462,20 @@
     let currentState = null;
     let selectedWeek = urlParams.get('week') ? Number(urlParams.get('week')) : null;
     let lastKnownNflWeek = null;
-    let selectedMatchupId = 5;
+    let selectedMatchupId = 3;
     let showSleeperComparison = true;
     let autoSubByeOut = false;
     let showBench = true;
     let countdownSec = 10;
+
+    // Optimizer State
+    let activeTab = urlParams.get('tab') || 'matchups';
+    let optimizerRosterId = 3; // Default: Hoon Lounge Hooners (@stephencaputo)
+    let optimizerObjective = 'total_wins';
+    let optimizerMarketWeight = 0.75;
+    let customSubsetPlayerIds = null;
+    let customSubsetChooseK = null;
+    let lastOptimizerResult = null;
 
     // Track previous starters & scores to detect real-time lineup changes & scoring plays
     let previousScores = {};
@@ -410,7 +483,8 @@
     let activityLog = [];
 
     function switchTab(tabName) {
-      ['matchups', 'median', 'activity', 'model'].forEach((t) => {
+      activeTab = tabName;
+      ['matchups', 'optimizer', 'median', 'activity', 'model'].forEach((t) => {
         const content = document.getElementById(`tab-content-${t}`);
         const btn = document.getElementById(`tab-btn-${t}`);
         if (!content || !btn) return;
@@ -422,6 +496,9 @@
           btn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white flex items-center gap-1.5';
         }
       });
+      if (tabName === 'optimizer' && currentState) {
+        runAndRenderOptimizer(false);
+      }
     }
 
     function updateAutoSubButtonUI() {
@@ -1018,7 +1095,7 @@
                   <div class="text-slate-400">Sleeper Proj: ${a.sleeperTotalProj.toFixed(2)} (${formatSigned(a.projDeltaVsSleeper)})</div>
                 </div>
               </div>
-              <div class="mt-2 flex flex-wrap gap-1.5 text-xs font-mono-num">
+              <div class="mt-2 flex flex-wrap gap-1.5 text-xs font-mono-num items-center">
                 <span class="px-2 py-0.5 rounded bg-[#00ceb8]/15 text-[#00ceb8] font-semibold">
                   H2H Win: ${formatPct(a.simulation.h2hWinProbImproved)}
                 </span>
@@ -1028,6 +1105,9 @@
                 <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
                   80% Range: ${a.simulation.p10.toFixed(1)}–${a.simulation.p90.toFixed(1)}
                 </span>
+                <button onclick="openOptimizerForRoster(${a.rosterId})" class="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/30 font-sans font-bold transition">
+                  🎯 Optimize Lineup
+                </button>
               </div>
             </div>
 
@@ -1057,7 +1137,10 @@
                 </div>
                 <span class="text-3xl font-extrabold font-mono-num text-white">${b.currentPts.toFixed(2)}</span>
               </div>
-              <div class="mt-2 flex flex-wrap justify-end gap-1.5 text-xs font-mono-num">
+              <div class="mt-2 flex flex-wrap justify-end gap-1.5 text-xs font-mono-num items-center">
+                <button onclick="openOptimizerForRoster(${b.rosterId})" class="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/30 font-sans font-bold transition">
+                  🎯 Optimize Lineup
+                </button>
                 <span class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold">
                   H2H Win: ${formatPct(b.simulation.h2hWinProbImproved)}
                 </span>
@@ -1215,12 +1298,648 @@
       document.getElementById('diag-med-ci80').textContent = `${med.p10.toFixed(2)} – ${med.p90.toFixed(2)} pts`;
     }
 
+    function populateOptimizerRosterDropdown(data) {
+      const sel = document.getElementById('opt-roster-select');
+      if (!sel || !data.rostersData) return;
+      const sorted = [...data.rostersData].sort((a, b) => {
+        if (a.rosterId === 3) return -1;
+        if (b.rosterId === 3) return 1;
+        return a.teamName.localeCompare(b.teamName);
+      });
+      sel.innerHTML = sorted.map((r) => `
+        <option value="${r.rosterId}" class="bg-[#121723] text-white" ${r.rosterId === Number(optimizerRosterId) ? 'selected' : ''}>
+          ${r.teamName} (@${r.ownerName})${r.rosterId === 3 ? ' ★ My Team' : ''}
+        </option>
+      `).join('');
+    }
+
+    function openOptimizerForRoster(rosterId) {
+      optimizerRosterId = Number(rosterId);
+      customSubsetPlayerIds = null;
+      customSubsetChooseK = null;
+      const sel = document.getElementById('opt-roster-select');
+      if (sel) sel.value = String(optimizerRosterId);
+      switchTab('optimizer');
+      runAndRenderOptimizer(true);
+    }
+
+    function onOptimizerRosterChange() {
+      const sel = document.getElementById('opt-roster-select');
+      if (!sel) return;
+      optimizerRosterId = Number(sel.value);
+      customSubsetPlayerIds = null;
+      customSubsetChooseK = null;
+      runAndRenderOptimizer(true);
+    }
+
+    function onOptimizerParamsChange() {
+      const objSel = document.getElementById('opt-objective-select');
+      if (objSel) optimizerObjective = objSel.value;
+      runAndRenderOptimizer(true);
+    }
+
+    function onMarketWeightChange() {
+      const mwSel = document.getElementById('opt-market-weight');
+      if (mwSel) optimizerMarketWeight = Number(mwSel.value);
+      fetchLiveState(true);
+    }
+
+    function applyAnalyzerPreset(presetId) {
+      if (!lastOptimizerResult || !lastOptimizerResult.subsetAnalyzer) return;
+      const preset = (lastOptimizerResult.subsetAnalyzer.presets || []).find((p) => p.id === presetId);
+      if (!preset) return;
+      customSubsetPlayerIds = [...preset.playerIds];
+      customSubsetChooseK = preset.chooseK;
+      runAndRenderOptimizer(true);
+    }
+
+    function toggleSubsetCandidate(playerId) {
+      const pid = String(playerId);
+      const currentIds = customSubsetPlayerIds
+        ? [...customSubsetPlayerIds]
+        : [...(lastOptimizerResult?.subsetAnalyzer?.selectedPlayerIds || [])];
+      const idx = currentIds.indexOf(pid);
+      if (idx >= 0) {
+        if (currentIds.length <= 2) return; // Keep at least 2 players to compare
+        currentIds.splice(idx, 1);
+      } else {
+        if (currentIds.length >= 7) return; // Cap at 7 so combinations stay clean
+        currentIds.push(pid);
+      }
+      customSubsetPlayerIds = currentIds;
+      const k = customSubsetChooseK || lastOptimizerResult?.subsetAnalyzer?.chooseK || 2;
+      customSubsetChooseK = Math.min(currentIds.length - 1, Math.max(1, k));
+      runAndRenderOptimizer(true);
+    }
+
+    function setSubsetChooseK(kVal) {
+      customSubsetChooseK = Number(kVal);
+      if (!customSubsetPlayerIds && lastOptimizerResult?.subsetAnalyzer?.selectedPlayerIds) {
+        customSubsetPlayerIds = [...lastOptimizerResult.subsetAnalyzer.selectedPlayerIds];
+      }
+      runAndRenderOptimizer(true);
+    }
+
+    function applyOptimalLineupToWhatIf() {
+      if (!currentState || !lastOptimizerResult) return;
+      const roster = currentState.rostersData.find((r) => r.rosterId === Number(optimizerRosterId));
+      if (!roster) return;
+      const optLineup = lastOptimizerResult.optimalCandidate.lineup;
+      const optIds = new Set(optLineup.map((p) => p.playerId).filter((id) => id !== '0'));
+      const allPlayers = [...roster.starters, ...roster.bench].filter((p) => p && p.playerId !== '0');
+      const seen = new Set();
+      const uniqueAll = [];
+      for (const p of allPlayers) {
+        if (!seen.has(p.playerId)) {
+          seen.add(p.playerId);
+          uniqueAll.push(p);
+        }
+      }
+      roster.starters = optLineup.map((p) => ({ ...p }));
+      roster.bench = uniqueAll
+        .filter((p) => !optIds.has(p.playerId))
+        .map((p) => ({ ...p, slot: 'BN' }))
+        .sort((a, b) => b.improvedProj - a.improvedProj);
+
+      currentState = window.SleeperTrackerEngine.recomputeLeagueFromRosters(currentState, currentState.rostersData);
+      selectedMatchupId = roster.matchupId;
+      renderAll(currentState);
+      switchTab('matchups');
+    }
+
+    function runAndRenderOptimizer(forceRecompute = false) {
+      if (!currentState) return;
+      const container = document.getElementById('optimizer-dynamic-body');
+      if (!container) return;
+
+      const sbBadge = document.getElementById('opt-sportsbook-badge');
+      if (sbBadge) {
+        if (currentState.sportsbookWeekLoaded === currentState.league.week) {
+          sbBadge.textContent = `Week ${currentState.league.week} OWS Sportsbook Props + ESPN Odds + CFTC Prediction Markets Active`;
+          sbBadge.className = 'px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-mono-num';
+        } else {
+          sbBadge.textContent = `Week ${currentState.league.week} CFTC Prediction Markets + Vegas Totals Active`;
+          sbBadge.className = 'px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 text-xs font-mono-num';
+        }
+      }
+
+      const opt = window.SleeperTrackerEngine.runSimulationLineupOptimizer(currentState, optimizerRosterId, {
+        numSims: 8000,
+        objective: optimizerObjective,
+        marketWeight: optimizerMarketWeight,
+        subsetPlayerIds: customSubsetPlayerIds,
+        subsetChooseK: customSubsetChooseK
+      });
+      lastOptimizerResult = opt;
+
+      // Update top nav badge with recommended swap count
+      const navBadge = document.getElementById('optimizer-nav-badge');
+      if (navBadge) {
+        const swapCount = opt.recommendedSwaps.length;
+        navBadge.textContent = swapCount > 0 ? `${swapCount} SWAPS` : 'OPTIMAL';
+      }
+
+      const currM = opt.currentSetMetrics;
+      const slpM = opt.sleeperMaxMetrics;
+      const optM = opt.optimalCandidate.metrics;
+
+      const winGainVsCurr = optM.expectedWeeklyWins - currM.expectedWeeklyWins;
+      const h2hGainVsCurr = (optM.h2hWinProb - currM.h2hWinProb) * 100;
+      const medGainVsCurr = (optM.medianWinProb - currM.medianWinProb) * 100;
+      const ptsGainVsCurr = optM.expectedPts - currM.expectedPts;
+
+      const winGainVsSlp = optM.expectedWeeklyWins - slpM.expectedWeeklyWins;
+      const h2hGainVsSlp = (optM.h2hWinProb - slpM.h2hWinProb) * 100;
+
+      // 1. Recommended Swaps HTML
+      const swapsHtml = opt.recommendedSwaps.length === 0
+        ? `
+          <div class="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center gap-2">
+            <span>✅ Your current Sleeper starting lineup is already 100% optimal across all 8,000 correlated simulations!</span>
+          </div>
+        `
+        : opt.recommendedSwaps.map((s) => {
+            const outName = (!s.outPlayer || s.outPlayer.playerId === '0')
+              ? 'EMPTY SLOT'
+              : `${s.outPlayer.fullName} (${s.outPlayer.team} ${s.outPlayer.position})`;
+            const outProj = (!s.outPlayer || s.outPlayer.playerId === '0') ? '0.00' : s.outPlayer.improvedProj.toFixed(2);
+            const inP = s.inPlayer;
+            const slotBadge = s.slot === 'SUPER_FLEX' ? 'SFLEX' : (s.slot === 'IDP_FLEX' ? 'IDP' : s.slot);
+            return `
+              <div class="p-3.5 rounded-xl bg-[#121723] border border-[#00ceb8]/35 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div class="flex items-start sm:items-center gap-3">
+                  <span class="px-2.5 py-1 rounded-lg text-xs font-extrabold pos-${s.slot} shrink-0">${slotBadge}</span>
+                  <div>
+                    <div class="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
+                      <span class="text-rose-400 font-semibold line-through">${outName} (${outProj})</span>
+                      <span class="text-slate-400 font-bold">→</span>
+                      <span class="text-[#00ceb8] font-extrabold">${inP.fullName} (${inP.team} ${inP.position})</span>
+                      <span class="font-mono-num text-xs px-1.5 py-0.5 rounded bg-[#00ceb8]/20 text-[#00ceb8] font-bold">
+                        ${inP.improvedProj.toFixed(2)} pts (${formatSigned(s.projDelta)})
+                      </span>
+                    </div>
+                    <div class="text-xs text-slate-300 mt-1 flex flex-wrap gap-1.5">
+                      ${s.reasons.map((r) => `<span class="px-2 py-0.5 rounded bg-[#1d263b] text-sky-300 border border-[#2e3c5c]">${r}</span>`).join('')}
+                    </div>
+                  </div>
+                </div>
+                <div class="text-right font-mono-num text-xs shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-[#232c3f]">
+                  <div class="text-slate-300">Market: <strong class="text-white">${inP.improvedProj.toFixed(2)}</strong></div>
+                  <div class="text-slate-400">Sleeper: ${inP.sleeperProj.toFixed(2)} ${inP.sportsbookProj ? `• SB Prop: <span class="text-amber-300">${inP.sportsbookProj.toFixed(2)}</span>` : ''}</div>
+                </div>
+              </div>
+            `;
+          }).join('');
+
+      // 2. "Best K of N Players" Same-Team / Close-Projection Conflict Analyzer HTML
+      const sub = opt.subsetAnalyzer;
+      const selectedSet = new Set(sub.selectedPlayerIds.map(String));
+
+      // Detect team counts among selected subset candidates so we can highlight same-team conflicts
+      const teamCountsInSubset = {};
+      for (const pid of sub.selectedPlayerIds) {
+        const pObj = sub.availableCandidates.find((x) => String(x.playerId) === String(pid));
+        if (pObj && pObj.team) teamCountsInSubset[pObj.team] = (teamCountsInSubset[pObj.team] || 0) + 1;
+      }
+
+      const presetsHtml = (sub.presets || []).map((pr) => {
+        const isCurrentPreset =
+          pr.chooseK === sub.chooseK &&
+          pr.playerIds.length === sub.selectedPlayerIds.length &&
+          pr.playerIds.every((id) => selectedSet.has(String(id)));
+        return `
+          <button onclick="applyAnalyzerPreset('${pr.id}')"
+                  class="px-3 py-1.5 rounded-xl text-xs font-semibold transition border ${
+                    isCurrentPreset
+                      ? 'bg-[#00ceb8] text-slate-950 border-[#00ceb8] font-bold shadow'
+                      : 'bg-[#121723] text-slate-300 border-[#2b354b] hover:border-[#00ceb8]/50 hover:text-white'
+                  }">
+            ${pr.label}
+          </button>
+        `;
+      }).join('');
+
+      const candidatePillsHtml = sub.availableCandidates.slice(0, 14).map((p) => {
+        const isSel = selectedSet.has(String(p.playerId));
+        const sharesTeam = isSel && teamCountsInSubset[p.team] >= 2;
+        return `
+          <button onclick="toggleSubsetCandidate('${p.playerId}')"
+                  class="px-2.5 py-1.5 rounded-xl text-xs transition border flex items-center gap-1.5 ${
+                    isSel
+                      ? (sharesTeam
+                          ? 'bg-amber-500/20 border-amber-400 text-white font-bold ring-1 ring-amber-400/40'
+                          : 'bg-[#00ceb8]/20 border-[#00ceb8] text-white font-bold')
+                      : 'bg-[#121723]/80 border-[#263044] text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                  }">
+            <span class="w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] ${
+              isSel ? 'bg-[#00ceb8] text-slate-950 font-extrabold' : 'border border-slate-600'
+            }">${isSel ? '✓' : ''}</span>
+            <span>${p.shortName}</span>
+            <span class="px-1 py-0.2 rounded text-[10px] font-mono-num ${sharesTeam ? 'bg-amber-400/30 text-amber-200' : 'bg-slate-800 text-slate-300'}">${p.team} ${p.position}</span>
+            <span class="font-mono-num text-[#00ceb8]">${p.improvedProj.toFixed(1)}</span>
+          </button>
+        `;
+      }).join('');
+
+      const maxK = Math.min(4, Math.max(1, sub.selectedPlayerIds.length - 1));
+      const kButtonsHtml = [];
+      for (let k = 1; k <= maxK; k++) {
+        kButtonsHtml.push(`
+          <button onclick="setSubsetChooseK(${k})"
+                  class="px-2.5 py-1 rounded-lg text-xs font-mono-num font-bold transition ${
+                    sub.chooseK === k
+                      ? 'bg-[#00ceb8] text-slate-950'
+                      : 'bg-[#121723] text-slate-300 border border-[#2b354b] hover:border-[#00ceb8]'
+                  }">
+            Pick ${k} of ${sub.selectedPlayerIds.length}
+          </button>
+        `);
+      }
+
+      // Generate dynamic insight comparing top combinations (especially highlighting same-team cannibalization vs diversification)
+      let subsetInsightHtml = '';
+      if (sub.combinations.length >= 2) {
+        const bestCombo = sub.combinations[0];
+        const sameTeamCombo = sub.combinations.find((c) => c.sameTeamCount > 0);
+        const diffTeamCombo = sub.combinations.find((c) => c.sameTeamCount === 0 && c.slotFit?.isValid);
+        if (sameTeamCombo && diffTeamCombo) {
+          const pairText = sameTeamCombo.pairCorrs.filter((x) => x.corr !== 0).map((x) => `${x.pair} (ρ = ${x.corr.toFixed(2)})`).join(', ');
+          const winDiff = ((bestCombo.metrics.expectedWeeklyWins - sub.combinations[1].metrics.expectedWeeklyWins) * 100).toFixed(2);
+          subsetInsightHtml = `
+            <div class="p-3.5 rounded-xl bg-amber-500/10 border border-amber-400/30 text-xs text-slate-200 leading-relaxed">
+              <strong class="text-amber-300">⚡ Same-Team &amp; Matchup Correlation Finding:</strong>
+              Among the <strong>${sub.combinations.length}</strong> possible ${sub.chooseK}-player combinations,
+              <strong class="text-[#00ceb8]">${bestCombo.label}</strong> ranks #1 with
+              <strong class="font-mono-num text-white">${bestCombo.metrics.expectedWeeklyWins.toFixed(3)} Expected Weekly Wins</strong>
+              (<span class="font-mono-num text-[#00ceb8]">${formatPct(bestCombo.metrics.h2hWinProb)} H2H</span> •
+              <span class="font-mono-num text-emerald-300">${formatPct(bestCombo.metrics.medianWinProb)} Median</span> •
+              <span class="font-mono-num">${formatPct(bestCombo.metrics.prob2_0)} 2-0 Sweep</span>).
+              ${pairText ? `Starting teammates <strong>${pairText}</strong> introduces negative TD/target cannibalization, widening bust risk when that offense stalls while diversification (<strong class="text-sky-300">${diffTeamCombo.label}</strong>) raises the 10th-percentile floor to <span class="font-mono-num">${diffTeamCombo.metrics.p10.toFixed(1)} pts</span>.` : ''}
+            </div>
+          `;
+        }
+      }
+
+      const subsetRowsHtml = sub.combinations.map((c, idx) => {
+        const rank = idx + 1;
+        const m = c.metrics;
+        const corrBadges = [
+          ...c.pairCorrs.filter((x) => Math.abs(x.corr) >= 0.02).map((x) => {
+            const isNeg = x.corr < 0;
+            return `<span class="px-1.5 py-0.5 rounded text-[11px] font-mono-num ${
+              isNeg ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+            }">${x.sameTeam ? '⚠️ Same Team' : 'Same Game'}: ${x.pair} (ρ=${formatSigned(x.corr, 2)})</span>`;
+          }),
+          ...c.coreCorrs.slice(0, 2).map((x) => {
+            const isNeg = x.corr < 0;
+            return `<span class="px-1.5 py-0.5 rounded text-[11px] font-mono-num ${
+              isNeg ? 'bg-amber-500/15 text-amber-300' : 'bg-sky-500/15 text-sky-300'
+            }">Core: ${x.pair} (ρ=${formatSigned(x.corr, 2)})</span>`;
+          })
+        ];
+
+        return `
+          <tr class="hover:bg-[#1e2638]/70 transition ${rank === 1 ? 'bg-[#00ceb8]/10' : ''} ${!c.slotFit?.isValid ? 'opacity-65' : ''}">
+            <td class="py-3 px-2.5 font-mono-num font-bold text-xs ${rank === 1 ? 'text-[#00ceb8]' : 'text-slate-400'}">
+              #${rank}
+              ${c.isOptimalCombo ? '<span class="ml-1 px-1.5 py-0.5 rounded bg-[#00ceb8] text-slate-950 text-[10px] font-extrabold">OPTIMAL</span>' : ''}
+            </td>
+            <td class="py-3 px-2.5">
+              <div class="font-bold text-xs sm:text-sm text-white">${c.label}</div>
+              <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                  c.slotFit?.isValid ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+                }">${c.slotFit?.isValid ? '✅ Fits Roster Slots' : '⚠️ Exceeds RB/WR Slot Cap'}</span>
+                ${corrBadges.length ? corrBadges.join('') : '<span class="text-[11px] text-slate-400">Independent NFL games (ρ = 0.00)</span>'}
+              </div>
+            </td>
+            <td class="py-3 px-2 text-right font-mono-num text-xs">
+              <div class="font-bold text-white">${c.subsetExpectedPts.toFixed(2)}</div>
+              <div class="text-slate-400">Slp: ${c.subsetSleeperPts.toFixed(2)}</div>
+            </td>
+            <td class="py-3 px-2 text-right font-mono-num text-xs font-semibold text-slate-200">
+              ${m.expectedPts.toFixed(2)}
+            </td>
+            <td class="py-3 px-2 text-center font-mono-num text-xs text-slate-300">
+              <span class="text-rose-300/90">${m.p10.toFixed(1)}</span> – <span class="text-emerald-300">${m.p90.toFixed(1)}</span>
+            </td>
+            <td class="py-3 px-2 text-right font-mono-num text-xs font-bold text-[#00ceb8]">
+              ${formatPct(m.h2hWinProb)}
+            </td>
+            <td class="py-3 px-2 text-right font-mono-num text-xs font-bold text-emerald-300">
+              ${formatPct(m.medianWinProb)}
+            </td>
+            <td class="py-3 px-2 text-right font-mono-num text-xs text-amber-300 font-semibold">
+              ${formatPct(m.prob2_0)}
+            </td>
+            <td class="py-3 px-2.5 text-right font-mono-num text-sm font-extrabold ${rank === 1 ? 'text-[#00ceb8]' : 'text-white'}">
+              ${m.expectedWeeklyWins.toFixed(3)}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      // 3. Full 14-Slot Optimal Lineup Table HTML
+      const currIdsSet = new Set(opt.currentStarters.map((p) => p.playerId).filter((id) => id !== '0'));
+      const optimalSlotsRowsHtml = opt.optimalCandidate.lineup.map((p, idx) => {
+        const currP = opt.currentStarters[idx];
+        const isSwappedIn = !currP || currP.playerId !== p.playerId;
+        const isNewStarter = p.playerId !== '0' && !currIdsSet.has(p.playerId);
+        const slotLabel = p.slot === 'SUPER_FLEX' ? 'SFLEX' : (p.slot === 'IDP_FLEX' ? 'IDP' : p.slot);
+        const sb = p.sportsbookRaw;
+        let propSummary = '<span class="text-slate-500">Prediction Market + Vegas Implied Total</span>';
+        if (sb) {
+          const parts = [];
+          if (sb.py > 0) parts.push(`${sb.py} PassYds, ${sb.ptd} PassTD`);
+          if (sb.ry > 0) parts.push(`${sb.ry} RushYds`);
+          if (sb.rec > 0 || sb.recy > 0) parts.push(`${sb.rec} Rec, ${sb.recy} RecYds`);
+          if (sb.td > 0) parts.push(`${sb.td.toFixed(2)} TD`);
+          propSummary = `<span class="text-amber-300 font-mono-num">${parts.join(' • ')}</span>`;
+        } else if (p.playerId === '0') {
+          propSummary = '<span class="text-rose-400">No eligible active player on roster</span>';
+        }
+        const mktDelta = p.improvedProj - p.sleeperProj;
+        return `
+          <tr class="border-b border-[#232c3f] ${isNewStarter ? 'bg-[#00ceb8]/10' : ''}">
+            <td class="py-2.5 px-2.5">
+              <span class="px-2 py-0.5 rounded text-xs font-extrabold pos-${p.slot}">${slotLabel}</span>
+            </td>
+            <td class="py-2.5 px-2.5">
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-xs sm:text-sm text-white">${p.fullName}</span>
+                <span class="text-xs text-slate-400 font-mono-num">${p.team} ${p.position}</span>
+                ${isNewStarter ? '<span class="px-1.5 py-0.2 rounded bg-[#00ceb8] text-slate-950 text-[10px] font-extrabold">SWAP IN</span>' : ''}
+              </div>
+              ${isSwappedIn && currP ? `<div class="text-[11px] text-rose-400">Replaces: ${currP.fullName} (${currP.improvedProj.toFixed(2)})</div>` : ''}
+            </td>
+            <td class="py-2.5 px-2.5 text-xs">${propSummary}</td>
+            <td class="py-2.5 px-2 text-right font-mono-num text-xs text-amber-300 font-semibold">
+              ${p.sportsbookProj !== null && p.sportsbookProj !== undefined ? p.sportsbookProj.toFixed(2) : '—'}
+            </td>
+            <td class="py-2.5 px-2 text-right font-mono-num text-xs text-slate-300">
+              ${p.sleeperProj.toFixed(2)}
+            </td>
+            <td class="py-2.5 px-2.5 text-right font-mono-num text-xs font-extrabold text-[#00ceb8]">
+              ${p.improvedProj.toFixed(2)}
+              <span class="text-[10px] ${mktDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}">(${formatSigned(mktDelta, 2)})</span>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      // 4. Pairwise Correlation Matrix Heatmap HTML
+      const cm = opt.rosterCorrMatrix;
+      const corrMatrixHtml = `
+        <div class="overflow-x-auto">
+          <table class="w-full text-center border-collapse text-[11px] font-mono-num">
+            <thead>
+              <tr>
+                <th class="p-1.5 text-left text-slate-400 bg-[#121723] sticky left-0">Player (Team)</th>
+                ${cm.players.map((p) => `<th class="p-1 text-slate-300 font-semibold whitespace-nowrap">${p.shortName.split(' ').pop()}<br><span class="text-[9px] text-slate-400">${p.team}</span></th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${cm.players.map((pRow, rIdx) => `
+                <tr class="border-t border-[#232c3f]">
+                  <td class="p-1.5 text-left font-sans font-semibold text-slate-200 bg-[#121723] whitespace-nowrap sticky left-0">
+                    ${pRow.shortName} <span class="text-[10px] text-slate-400">(${pRow.team} ${pRow.position})</span>
+                  </td>
+                  ${cm.matrix[rIdx].map((val, cIdx) => {
+                    if (rIdx === cIdx) {
+                      return `<td class="p-1 bg-slate-800/80 text-slate-400">1.00</td>`;
+                    }
+                    if (Math.abs(val) < 0.01) {
+                      return `<td class="p-1 text-slate-600">0.00</td>`;
+                    }
+                    const cellStyle = val > 0
+                      ? (val >= 0.25 ? 'bg-emerald-500/35 text-emerald-200 font-bold' : 'bg-emerald-500/15 text-emerald-300')
+                      : (val <= -0.12 ? 'bg-rose-500/35 text-rose-200 font-bold' : 'bg-rose-500/15 text-rose-300');
+                    return `<td class="p-1 rounded ${cellStyle}">${formatSigned(val, 2)}</td>`;
+                  }).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      container.innerHTML = `
+        <!-- SECTION 1: EXECUTIVE LINEUP COMPARISON & RECOMMENDED SWAPS -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <!-- Left 5 Cols: 3-Way Simulation Performance Comparison -->
+          <div class="lg:col-span-5 bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-sm font-bold text-white uppercase tracking-wider">Simulated Matchup &amp; Median Impact</h3>
+                <p class="text-xs text-slate-400">${opt.targetTeamName} vs ${opt.oppTeamName} (${opt.oppProjectedPts.toFixed(2)} proj)</p>
+              </div>
+              <span class="text-xs font-mono-num text-slate-400">${opt.computeTimeMs}ms • 8,000 CRN Sims</span>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2.5 text-center">
+              <!-- Current Set Lineup -->
+              <div class="p-3 rounded-xl bg-[#121723] border border-[#2b354b]">
+                <div class="text-[10px] font-bold uppercase text-slate-400">Current Lineup</div>
+                <div class="text-xl font-extrabold font-mono-num text-slate-200 mt-1">${currM.expectedWeeklyWins.toFixed(3)}</div>
+                <div class="text-[10px] text-slate-400">Expected Wins</div>
+                <div class="mt-2 pt-2 border-t border-[#232c3f] space-y-1 text-xs font-mono-num">
+                  <div class="flex justify-between"><span class="text-slate-400">H2H:</span><span>${formatPct(currM.h2hWinProb)}</span></div>
+                  <div class="flex justify-between"><span class="text-slate-400">Med:</span><span>${formatPct(currM.medianWinProb)}</span></div>
+                  <div class="flex justify-between"><span class="text-slate-400">2-0:</span><span>${formatPct(currM.prob2_0)}</span></div>
+                  <div class="flex justify-between"><span class="text-slate-400">Pts:</span><span>${currM.expectedPts.toFixed(1)}</span></div>
+                </div>
+              </div>
+
+              <!-- Naive Sleeper Max -->
+              <div class="p-3 rounded-xl bg-[#121723] border border-[#2b354b]">
+                <div class="text-[10px] font-bold uppercase text-sky-300">Sleeper Static Max</div>
+                <div class="text-xl font-extrabold font-mono-num text-sky-200 mt-1">${slpM.expectedWeeklyWins.toFixed(3)}</div>
+                <div class="text-[10px] text-slate-400">Expected Wins</div>
+                <div class="mt-2 pt-2 border-t border-[#232c3f] space-y-1 text-xs font-mono-num">
+                  <div class="flex justify-between"><span class="text-slate-400">H2H:</span><span>${formatPct(slpM.h2hWinProb)}</span></div>
+                  <div class="flex justify-between"><span class="text-slate-400">Med:</span><span>${formatPct(slpM.medianWinProb)}</span></div>
+                  <div class="flex justify-between"><span class="text-slate-400">2-0:</span><span>${formatPct(slpM.prob2_0)}</span></div>
+                  <div class="flex justify-between"><span class="text-slate-400">Pts:</span><span>${slpM.expectedPts.toFixed(1)}</span></div>
+                </div>
+              </div>
+
+              <!-- Optimal Market + MC Lineup -->
+              <div class="p-3 rounded-xl bg-[#00ceb8]/15 border-2 border-[#00ceb8] shadow-lg">
+                <div class="text-[10px] font-extrabold uppercase text-[#00ceb8]">Optimal MC Lineup</div>
+                <div class="text-xl font-extrabold font-mono-num text-white mt-1">${optM.expectedWeeklyWins.toFixed(3)}</div>
+                <div class="text-[10px] text-[#00ceb8] font-bold">${formatSigned(winGainVsCurr, 3)} W vs Curr</div>
+                <div class="mt-2 pt-2 border-t border-[#00ceb8]/30 space-y-1 text-xs font-mono-num">
+                  <div class="flex justify-between"><span class="text-slate-300">H2H:</span><span class="font-bold text-white">${formatPct(optM.h2hWinProb)}</span></div>
+                  <div class="flex justify-between"><span class="text-slate-300">Med:</span><span class="font-bold text-white">${formatPct(optM.medianWinProb)}</span></div>
+                  <div class="flex justify-between"><span class="text-slate-300">2-0:</span><span class="font-bold text-emerald-300">${formatPct(optM.prob2_0)}</span></div>
+                  <div class="flex justify-between"><span class="text-slate-300">Pts:</span><span class="font-bold text-[#00ceb8]">${optM.expectedPts.toFixed(1)}</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="p-3 rounded-xl bg-[#121723] border border-[#2b354b] text-xs space-y-1.5">
+              <div class="flex justify-between font-mono-num">
+                <span class="text-slate-400">Gain vs Current Lineup:</span>
+                <span class="text-[#00ceb8] font-bold">${formatSigned(ptsGainVsCurr, 2)} pts • ${formatSigned(h2hGainVsCurr, 1)}% H2H • ${formatSigned(medGainVsCurr, 1)}% Median</span>
+              </div>
+              <div class="flex justify-between font-mono-num">
+                <span class="text-slate-400">Edge vs Naive Sleeper Sort:</span>
+                <span class="text-amber-300 font-bold">${formatSigned(winGainVsSlp, 4)} Wins (${formatSigned(h2hGainVsSlp, 2)}% H2H Win Prob)</span>
+              </div>
+            </div>
+
+            <button onclick="applyOptimalLineupToWhatIf()" class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-[#00ceb8] to-[#38bdf8] text-slate-950 font-extrabold text-xs shadow-lg hover:opacity-95 transition">
+              ✨ Apply Optimal Lineup into Live Matchup Simulator →
+            </button>
+          </div>
+
+          <!-- Right 7 Cols: Actionable Slot-by-Slot Recommended Swaps -->
+          <div class="lg:col-span-7 bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-sm font-bold text-white uppercase tracking-wider">Recommended Lineup Actions (${opt.recommendedSwaps.length})</h3>
+                <p class="text-xs text-slate-400">Driven by Sportsbook Props, Prediction Market implied totals, and teammate correlation structure.</p>
+              </div>
+            </div>
+            <div class="space-y-2.5">
+              ${swapsHtml}
+            </div>
+          </div>
+        </div>
+
+        <!-- SECTION 2: INTERACTIVE "BEST K OF N PLAYERS" SAME-TEAM & CLOSE-PROJECTION CONFLICT ANALYZER -->
+        <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-xs font-bold uppercase font-mono-num">Teammate Cannibalization &amp; Close-Decision Solver</span>
+              </div>
+              <h3 class="text-base font-extrabold text-white mt-1">
+                "Best ${sub.chooseK} of ${sub.selectedPlayerIds.length} Players" — Correlated Subset Simulator
+              </h3>
+              <p class="text-xs text-slate-400">
+                When 2+ players have similar projections and share the same NFL team (e.g. RB + WR TD cannibalization, ρ = -0.14) or game, compare every C(N, K) combination embedded in your full lineup across 8,000 correlated simulations.
+              </p>
+            </div>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              ${kButtonsHtml.join('')}
+            </div>
+          </div>
+
+          <!-- Smart Presets Bar -->
+          <div class="space-y-1.5">
+            <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Quick Decision Presets for ${opt.targetTeamName}:</div>
+            <div class="flex flex-wrap gap-2">
+              ${presetsHtml}
+            </div>
+          </div>
+
+          <!-- Clickable Candidate Player Pills -->
+          <div class="space-y-1.5">
+            <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              Click Any Roster Players Below to Customize the Comparison Pool (Amber = Same-Team Conflict):
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              ${candidatePillsHtml}
+            </div>
+          </div>
+
+          ${subsetInsightHtml}
+
+          <!-- Subset Comparison Table -->
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="border-b border-[#2b354b] text-[11px] text-slate-400 uppercase">
+                  <th class="py-2.5 px-2.5">Rank</th>
+                  <th class="py-2.5 px-2.5">Player Combination (${sub.chooseK} of ${sub.selectedPlayerIds.length}) &amp; Correlation Tags</th>
+                  <th class="py-2.5 px-2 text-right">Subset Pts</th>
+                  <th class="py-2.5 px-2 text-right">Full Lineup</th>
+                  <th class="py-2.5 px-2 text-center">Floor p10 – Ceiling p90</th>
+                  <th class="py-2.5 px-2 text-right">H2H Win %</th>
+                  <th class="py-2.5 px-2 text-right">Median Win %</th>
+                  <th class="py-2.5 px-2 text-right">2-0 Sweep %</th>
+                  <th class="py-2.5 px-2.5 text-right">E[Weekly Wins]</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[#232c3f]">
+                ${subsetRowsHtml}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- SECTION 3: FULL 14-SLOT OPTIMAL LINEUP & CORRELATION MATRIX -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <!-- Left 7 Cols: 14-Slot Optimal Lineup with Sportsbook Prop Lines -->
+          <div class="lg:col-span-7 bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-sm font-bold text-white uppercase tracking-wider">Optimal 14-Starter Lineup &amp; Sportsbook Prop Breakdown</h3>
+                <p class="text-xs text-slate-400">Sportsbook lines translated directly into League ${currentState.league.leagueId} custom scoring rules.</p>
+              </div>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="border-b border-[#2b354b] text-[11px] text-slate-400 uppercase">
+                    <th class="py-2 px-2.5">Slot</th>
+                    <th class="py-2 px-2.5">Optimal Starter</th>
+                    <th class="py-2 px-2.5">Sportsbook Prop Lines / Market Signal</th>
+                    <th class="py-2 px-2 text-right">SB Prop</th>
+                    <th class="py-2 px-2 text-right">Sleeper</th>
+                    <th class="py-2 px-2.5 text-right">Blended</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${optimalSlotsRowsHtml}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right 5 Cols: Pairwise Correlation Matrix & Active Stacks -->
+          <div class="lg:col-span-5 bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl space-y-4">
+            <div>
+              <h3 class="text-sm font-bold text-white uppercase tracking-wider">Roster Pairwise Correlation Matrix (ρ)</h3>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Used by our Block-Cholesky Monte Carlo simulator. Positive (green) = QB-WR stack or game shootout; Negative (red) = same-team RB/WR TD cannibalization.
+              </p>
+            </div>
+            ${corrMatrixHtml}
+
+            <div class="pt-3 border-t border-[#2b354b] space-y-2 text-xs">
+              <div class="font-bold text-slate-200 uppercase tracking-wider">Active Optimal Lineup Correlations:</div>
+              <div class="flex flex-wrap gap-1.5">
+                ${opt.optimalCandidate.stackPairs.map((s) => `
+                  <span class="px-2 py-1 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono-num">
+                    ⚡ Stack: ${s.pA} + ${s.pB} (ρ = +${s.corr.toFixed(2)})
+                  </span>
+                `).join('')}
+                ${opt.optimalCandidate.cannibalPairs.map((c) => `
+                  <span class="px-2 py-1 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 font-mono-num">
+                    ⚠️ Same-Team: ${c.pA} + ${c.pB} (${c.team}, ρ = ${c.corr.toFixed(2)})
+                  </span>
+                `).join('')}
+                ${opt.optimalCandidate.oppCorrelations.map((o) => `
+                  <span class="px-2 py-1 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 font-mono-num">
+                    ⚔️ vs Opp: ${o.ownPlayer} ↔ ${o.oppPlayer} (${o.team}, ρ = ${formatSigned(o.corr, 2)})
+                  </span>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     function renderAll(data) {
       document.getElementById('league-name').textContent = data.league.name;
       document.getElementById('league-id-display').textContent = data.league.leagueId;
       document.getElementById('season-badge').textContent = `${data.league.season} • Week ${data.league.week}`;
 
       populateWeekDropdown(data.league.currentNflWeek, data.league.week);
+      populateOptimizerRosterDropdown(data);
       detectChangesAndLog(data);
 
       renderNflTicker(data.nflGames);
@@ -1228,6 +1947,7 @@
       renderMatchupCards(data);
       renderSelectedMatchupDetail(data);
       renderMedianTab(data);
+      runAndRenderOptimizer(false);
 
       for (const m of data.matchups) {
         if (m.teamA) previousScores[m.teamA.rosterId] = m.teamA.currentPts;
@@ -1242,7 +1962,8 @@
           activeLeagueId,
           selectedWeek,
           force,
-          autoSubByeOut
+          autoSubByeOut,
+          optimizerMarketWeight
         );
 
         // Auto-rollover to new NFL week if the user had the live week open and Sleeper advanced the week
