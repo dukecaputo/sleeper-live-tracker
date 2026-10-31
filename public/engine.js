@@ -9,7 +9,9 @@
   if (typeof module === 'object' && module.exports) {
     module.exports = factory();
   } else {
-    root.SleeperTrackerEngine = factory();
+    const api = factory();
+    root.SleeperTrackerEngine = api;
+    root.SleeperEngine = api;
   }
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
