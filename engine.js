@@ -35,25 +35,32 @@
       }
     }
 
-    const fetchOpts = {
-      method,
-      headers: {
-        Accept: 'application/json',
-        ...(options.headers || {})
-      }
-    };
+    let requestUrl = url;
+    if (ttlMs === 0 && method === 'GET' && (url.includes('api.sleeper.app') || url.includes('api.sleeper.com'))) {
+      const sep = url.includes('?') ? '&' : '?';
+      requestUrl = `${url}${sep}_t=${now}`;
+    }
+
+    const fetchOpts = { method };
+    if (options.headers) {
+      fetchOpts.headers = { ...options.headers };
+    }
     if (body) fetchOpts.body = body;
-    if (ttlMs <= 10000 && typeof window !== 'undefined') {
+    if (ttlMs === 0 && typeof window !== 'undefined' && (url.includes('api.sleeper.app') || url.includes('api.sleeper.com'))) {
       fetchOpts.cache = 'no-store';
     }
 
-    const res = await fetch(url, fetchOpts);
+    const res = await fetch(requestUrl, fetchOpts);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status} fetching ${url}`);
     }
     const data = await res.json();
     cache.set(cacheKey, { ts: Date.now(), data });
     return data;
+  }
+
+  function clearCache() {
+    cache.clear();
   }
 
   function normalizePlayerName(name) {
@@ -281,33 +288,43 @@
       const hasIdpProp = ['tackles_and_assists', 'tackles', 'assists', 'sacks', 'defensive_ints'].some((k) => stats[k] !== undefined);
       if (!hasIdpProp) return null;
 
-      let totalTackles = Number(projStats?.idp_tkl || 4.0);
+      const baseTkl = projStats?.idp_tkl !== undefined
+        ? Number(projStats.idp_tkl)
+        : Number((projStats?.idp_tkl_solo || 0) + (projStats?.idp_tkl_ast || 0)) || 4.0;
+      let totalTackles = baseTkl;
       if (stats.tackles_and_assists) {
         const sv = Number(stats.tackles_and_assists.stat_value);
         const po = Number(stats.tackles_and_assists.p_over);
         totalTackles = Math.max(0.5, Number((sv + Math.max(1.1, sv * 0.28) * invNormCdf(po)).toFixed(2)));
       } else if (stats.tackles || stats.assists) {
-        const solo = stats.tackles ? Number(stats.tackles.stat_value) : 2.5;
-        const ast = stats.assists ? Number(stats.assists.stat_value) : 1.5;
+        const solo = stats.tackles ? Number(stats.tackles.stat_value) : (projStats?.idp_tkl_solo ?? 2.5);
+        const ast = stats.assists ? Number(stats.assists.stat_value) : (projStats?.idp_tkl_ast ?? 1.5);
         totalTackles = Number((solo + ast).toFixed(2));
       }
 
-      let sacks = Number(projStats?.idp_sack || 0.25);
+      let sacks = projStats?.idp_sack !== undefined ? Number(projStats.idp_sack) : (pos === 'DL' ? 0.28 : 0.05);
       if (stats.sacks) {
         sacks = Number(invertPoissonMean(Number(stats.sacks.stat_value), Number(stats.sacks.p_over)).toFixed(2));
       }
 
-      let defInts = Number(projStats?.idp_int || 0.08);
+      let defInts = projStats?.idp_int !== undefined ? Number(projStats.idp_int) : (pos === 'DB' ? 0.10 : 0.04);
       if (stats.defensive_ints) {
         defInts = Number(invertPoissonMean(Number(stats.defensive_ints.stat_value), Number(stats.defensive_ints.p_over)).toFixed(2));
       }
 
-      // Include ancillary IDP stats from baseline projection (QB hits, TFL, pass def, FF/FR)
-      const tfl = Number(projStats?.idp_tkl_loss || (sacks * 0.85 + totalTackles * 0.08));
-      const qbHit = Number(projStats?.idp_qb_hit || (sacks * 1.65));
-      const passDef = Number(projStats?.idp_pass_def || (defInts * 3.2 + (pos === 'DB' ? 0.45 : 0.15)));
-      const ff = Number(projStats?.idp_ff || 0.08);
-      const fumRec = Number(projStats?.idp_fum_rec || 0.04);
+      // Scale ancillary IDP stats (QB hits, TFL, pass def, FF/FR) proportionally to Underdog tackle/sack/INT props
+      const tklScale = baseTkl > 0.5 ? Math.max(0.75, Math.min(1.35, totalTackles / baseTkl)) : 1.0;
+      const tfl = projStats?.idp_tkl_loss !== undefined
+        ? Number(projStats.idp_tkl_loss) * tklScale
+        : (sacks * 0.85 + totalTackles * 0.06);
+      const qbHit = projStats?.idp_qb_hit !== undefined
+        ? (stats.sacks ? Math.max(Number(projStats.idp_qb_hit), sacks * 1.55) : Number(projStats.idp_qb_hit))
+        : (sacks * 1.55);
+      const passDef = projStats?.idp_pass_def !== undefined
+        ? (stats.defensive_ints ? Math.max(Number(projStats.idp_pass_def), defInts * 2.8) : Number(projStats.idp_pass_def))
+        : (defInts * 2.8 + (pos === 'DB' ? 0.35 : 0.12));
+      const ff = projStats?.idp_ff !== undefined ? Number(projStats.idp_ff) : 0.05;
+      const fumRec = projStats?.idp_fum_rec !== undefined ? Number(projStats.idp_fum_rec) : 0.03;
 
       const pts =
         totalTackles * (scoringSettings.idp_tkl ?? 0.5) +
@@ -801,7 +818,7 @@
    *  - Prediction Market Win Probability & Vegas Implied Team Total environment adjustment
    *  - Live in-game Bayesian usage, game script, and Red Zone micro-states
    */
-  function modelPlayer(playerId, actualPts, projEntry, statEntry, gameState, scoringSettings, sbPropEntry = null, marketWeight = 0.75, udEntry = null, marketSource = 'consensus') {
+  function modelPlayer(playerId, actualPts, projEntry, statEntry, gameState, scoringSettings, sbPropEntry = null, marketWeight = 1.0, udEntry = null, marketSource = 'consensus') {
     const pInfo = (projEntry && projEntry.player) || (statEntry && statEntry.player) || {};
     const projStats = (projEntry && projEntry.stats) || {};
     const liveStats = (statEntry && statEntry.stats) || {};
@@ -1699,10 +1716,22 @@
       gameBlocks.push({ m, L, players: bucket, globalIndices });
     }
 
-    // Generate 10,000 CRN realizations for every player and for the other 9 teams
+    // Generate 10,000 CRN realizations for every player (both Correlated Cholesky and Independent Uncorrelated)
+    // plus a macro Team Offensive Environment Shock per NFL team to capture implicit same-team concentration volatility!
     const rng = new FastRNG(20261031);
+    const rngIndep = new FastRNG(987654321);
     const playerTotalMatrix = Array.from({ length: totalActiveSimPlayers }, () => new Float32Array(numSims));
+    const playerIndepMatrix = Array.from({ length: totalActiveSimPlayers }, () => new Float32Array(numSims));
+    const teamMacroShockByTeam = new Map();
     const epsBuf = new Float64Array(40);
+
+    for (let b = 0; b < gameBlocks.length; b++) {
+      for (const pl of gameBlocks[b].players) {
+        if (pl.team && pl.team !== 'FA' && !teamMacroShockByTeam.has(pl.team)) {
+          teamMacroShockByTeam.set(pl.team, new Float32Array(numSims));
+        }
+      }
+    }
 
     for (let s = 0; s < numSims; s++) {
       for (let b = 0; b < gameBlocks.length; b++) {
@@ -1710,14 +1739,35 @@
         const m = blk.m;
         const L = blk.L;
         for (let i = 0; i < m; i++) epsBuf[i] = rng.nextGaussian();
+
+        // Record macro team environment shock for teams in this game block
+        const gameEnvShock = epsBuf[0];
+        const secondShock = m > 1 ? epsBuf[1] : epsBuf[0];
+        const primaryTeam = blk.players[0]?.team;
+        const seenTeamsInBlk = new Set();
+        for (let i = 0; i < m; i++) {
+          const tm = blk.players[i].team;
+          if (tm && tm !== 'FA' && !seenTeamsInBlk.has(tm)) {
+            seenTeamsInBlk.add(tm);
+            const tVec = teamMacroShockByTeam.get(tm);
+            if (tVec) {
+              tVec[s] = tm === primaryTeam ? gameEnvShock : (0.55 * gameEnvShock + 0.835 * secondShock);
+            }
+          }
+        }
+
         for (let i = 0; i < m; i++) {
           let zCorr = 0;
           const rowL = L[i];
           for (let j = 0; j <= i; j++) zCorr += rowL[j] * epsBuf[j];
           const pl = blk.players[i];
           const gIdx = blk.globalIndices[i];
-          const rem = sampleSkewedRemaining(zCorr, pl.remMeanImproved, pl.remSdImproved, pl.skewness);
-          playerTotalMatrix[gIdx][s] = pl.currentPts + rem;
+          const remCorr = sampleSkewedRemaining(zCorr, pl.remMeanImproved, pl.remSdImproved, pl.skewness);
+          playerTotalMatrix[gIdx][s] = pl.currentPts + remCorr;
+
+          const zIndep = rngIndep.nextGaussian();
+          const remIndep = sampleSkewedRemaining(zIndep, pl.remMeanImproved, pl.remSdImproved, pl.skewness);
+          playerIndepMatrix[gIdx][s] = pl.currentPts + remIndep;
         }
       }
     }
@@ -1730,15 +1780,18 @@
         const pl = blk.players[i];
         const gIdx = blk.globalIndices[i];
         const vec = playerTotalMatrix[gIdx];
+        const vecInd = playerIndepMatrix[gIdx];
         let sumV = 0;
-        for (let s = 0; s < numSims; s++) sumV += vec[s];
-        const sampleMean = sumV / numSims;
-        const targetMean = pl.improvedProj;
-        const shift = targetMean - sampleMean;
-        if (Math.abs(shift) > 1e-5) {
-          for (let s = 0; s < numSims; s++) {
-            vec[s] = Math.max(pl.currentPts, vec[s] + shift);
-          }
+        let sumInd = 0;
+        for (let s = 0; s < numSims; s++) {
+          sumV += vec[s];
+          sumInd += vecInd[s];
+        }
+        const shift = pl.improvedProj - sumV / numSims;
+        const shiftInd = pl.improvedProj - sumInd / numSims;
+        for (let s = 0; s < numSims; s++) {
+          vec[s] = Math.max(pl.currentPts, vec[s] + shift);
+          vecInd[s] = Math.max(pl.currentPts, vecInd[s] + shiftInd);
         }
       }
     }
@@ -1746,8 +1799,6 @@
     // Compute the 9 other teams' total scores in each trial s, and determine:
     //  - Opponent's score in trial s: oppTrialScores[s]
     //  - The 5th-highest score among the OTHER 9 teams in trial s: fifthOtherScore[s]
-    //    (Why? In a 10-team league, Target Team finishes in the Top 5 if and only if
-    //     Target Team's score > the 5th-highest score among the other 9 teams!)
     const otherTeamsIndices = [];
     let oppOtherIdx = -1;
     for (let i = 0; i < rostersData.length; i++) {
@@ -1789,9 +1840,6 @@
         if (k === oppOtherIdx) oppTrialScores[s] = tot;
       }
       nineBuf.sort();
-      // In ascending order of 9 other teams (indices 0..8):
-      // Index 4 is the 5th-highest score among the other 9 teams!
-      // If Target Team beats nineBuf[4], at most 4 other teams scored higher -> Target Team is Top 5!
       fifthOtherScore[s] = nineBuf[Math.max(0, nineBuf.length - 5)];
     }
 
@@ -1817,23 +1865,64 @@
       return z >= 0 ? 1 - p : p;
     }
 
-    // Helper to evaluate ANY 14-player lineup array in ~0.2ms using precomputed CRN matrices + exact correlated variance!
-    function evaluateCandidateLineup(lineupPlayers) {
+    // Build smooth Gaussian-kernel probability density across fixed score grid [90 .. 240]
+    const DIST_MIN = 90;
+    const DIST_MAX = 240;
+    const DIST_BINS = 42;
+    const DIST_STEP = (DIST_MAX - DIST_MIN) / (DIST_BINS - 1);
+    const distGridX = Array.from({ length: DIST_BINS }, (_, i) => Number((DIST_MIN + i * DIST_STEP).toFixed(1)));
+
+    function computeKernelDensity(sortedSamples) {
+      const n = sortedSamples.length;
+      if (n === 0) return distGridX.map(() => 0);
+      // Subsample 500 quantile points from sortedSamples for ultra-fast, noise-free Gaussian KDE
+      const kPts = 250;
+      const bandwidth = 5.2;
+      const invBw = 1 / bandwidth;
+      const normConst = 1 / (kPts * bandwidth * 2.50662827463);
+      const density = new Array(DIST_BINS).fill(0);
+      for (let q = 0; q < kPts; q++) {
+        const val = sortedSamples[Math.floor(((q + 0.5) / kPts) * n)];
+        for (let b = 0; b < DIST_BINS; b++) {
+          const z = (distGridX[b] - val) * invBw;
+          if (Math.abs(z) < 3.6) {
+            density[b] += Math.exp(-0.5 * z * z);
+          }
+        }
+      }
+      return density.map((v) => Number((v * normConst).toFixed(5)));
+    }
+
+    const oppSortedSamples = new Float32Array(oppTrialScores);
+    oppSortedSamples.sort();
+    const oppDensityCurve = computeKernelDensity(oppSortedSamples);
+
+    // Helper to evaluate ANY 14-player lineup array in ~0.3ms using precomputed CRN matrices,
+    // exact pairwise Cholesky correlations, and implicit Same-Team Offensive Concentration Volatility!
+    function evaluateCandidateLineup(lineupPlayers, includeDistribution = false) {
       let lockedSum = 0;
+      let pureVegasPts = 0;
       let expectedPts = 0;
       let sleeperPts = 0;
-      let exactVar = 0;
+      let indepVar = 0;
+      let pairCovVar = 0;
       let oppCov = 0;
       const simIds = [];
       const activePlayers = [];
+      const byTeamMap = new Map();
 
       for (const p of lineupPlayers) {
         if (!p || p.playerId === '0') continue;
+        pureVegasPts += Number(p.sportsbookProj ?? p.vegasMarketProj ?? p.improvedProj ?? 0);
         expectedPts += p.improvedProj;
         sleeperPts += p.sleeperProj;
         const sd = p.remSdImproved || 0;
-        exactVar += sd * sd;
+        indepVar += sd * sd;
         activePlayers.push(p);
+        if (p.team && p.team !== 'FA' && !['DL', 'LB', 'DB'].includes(p.canonicalPos)) {
+          if (!byTeamMap.has(p.team)) byTeamMap.set(p.team, []);
+          byTeamMap.get(p.team).push(p);
+        }
         const sIdx = playerSimSlot.get(p.playerId);
         if (sIdx !== undefined) {
           simIds.push(sIdx);
@@ -1842,7 +1931,7 @@
         }
       }
 
-      // Add exact pairwise Cholesky correlations within the lineup and counter-correlations with opponent starters
+      // 1. Pairwise Cholesky correlations within the lineup & counter-correlations with opponent
       for (let i = 0; i < activePlayers.length; i++) {
         const pA = activePlayers[i];
         const sdA = pA.remSdImproved || 0;
@@ -1852,7 +1941,7 @@
           const sdB = pB.remSdImproved || 0;
           if (sdB <= 0) continue;
           const rho = computePairwisePlayerCorrelation(pA, pB);
-          if (rho !== 0) exactVar += 2 * rho * sdA * sdB;
+          if (rho !== 0) pairCovVar += 2 * rho * sdA * sdB;
         }
         if (oppRoster) {
           for (const oppP of oppRoster.starters) {
@@ -1864,7 +1953,95 @@
           }
         }
       }
-      exactVar = Math.max(4.0, exactVar);
+
+      // 2. Implicit Same-Team Offensive Concentration Volatility:
+      // Starting 2+ offensive players from the same NFL team concentrates your lineup's exposure
+      // on that single NFL offense's macro scoring outcome (boom/shutout tail risk).
+      const sameTeamGroups = [];
+      const teamConcShocks = [];
+      let totalTeamConcVar = 0;
+
+      for (const [teamCode, tPlayers] of byTeamMap.entries()) {
+        if (tPlayers.length < 2) continue;
+        const k = tPlayers.length;
+        const hasQb = tPlayers.some((p) => p.canonicalPos === 'QB');
+        const hasRb = tPlayers.some((p) => p.canonicalPos === 'RB');
+        const hasPassCatcher = tPlayers.some((p) => p.canonicalPos === 'WR' || p.canonicalPos === 'TE');
+
+        let groupPairCov = 0;
+        const pairDetails = [];
+        for (let i = 0; i < k; i++) {
+          for (let j = i + 1; j < k; j++) {
+            const c = computePairwisePlayerCorrelation(tPlayers[i], tPlayers[j]);
+            const cov = 2 * c * (tPlayers[i].remSdImproved || 0) * (tPlayers[j].remSdImproved || 0);
+            groupPairCov += cov;
+            pairDetails.push({
+              pair: `${tPlayers[i].shortName} (${tPlayers[i].canonicalPos}) + ${tPlayers[j].shortName} (${tPlayers[j].canonicalPos})`,
+              corr: c,
+              covPts2: Number(cov.toFixed(2))
+            });
+          }
+        }
+
+        // Macro team-environment concentration shock (higher when 2 or 3 starters ride the same NFL team's offensive total)
+        const sumSd = tPlayers.reduce((s, p) => s + (p.remSdImproved || 0), 0);
+        const concScale = hasQb ? 0.16 * (k - 1) : 0.12 * (k - 1);
+        const macroConcSd = sumSd * concScale;
+        const macroConcVar = macroConcSd * macroConcSd;
+        totalTeamConcVar += macroConcVar;
+
+        const tShockVec = teamMacroShockByTeam.get(teamCode);
+        if (tShockVec && macroConcSd > 0.01) {
+          teamConcShocks.push({ vec: tShockVec, scale: macroConcSd });
+        }
+
+        const groupIndepVar = tPlayers.reduce((s, p) => s + Math.pow(p.remSdImproved || 0, 2), 0);
+        const groupTotalVar = Math.max(2.0, groupIndepVar + groupPairCov + macroConcVar);
+        const groupIndepSd = Math.sqrt(groupIndepVar);
+        const groupTotalSd = Math.sqrt(groupTotalVar);
+
+        let archetype = 'Same-Team Skill Pair';
+        if (k >= 3) {
+          archetype = `Heavy ${teamCode} Concentration (${k} Starters — High Boom/Bust Tail Risk)`;
+        } else if (hasQb && hasPassCatcher) {
+          archetype = `${teamCode} QB + Pass-Catcher Stack (Widens Ceiling & Volatility)`;
+        } else if (hasQb && hasRb) {
+          archetype = `${teamCode} QB + RB Offense Concentration`;
+        } else if (hasRb && hasPassCatcher) {
+          archetype = `${teamCode} RB + Pass-Catcher (Red-Zone TD Split vs Shared Team Risk)`;
+        }
+
+        sameTeamGroups.push({
+          team: teamCode,
+          count: k,
+          archetype,
+          teamImpliedPts: tPlayers[0]?.teamImpliedPts || 22.5,
+          vegasTotal: tPlayers[0]?.vegasTotal || 45.0,
+          opponent: tPlayers[0]?.opponent || '',
+          combinedVegasPts: Number(tPlayers.reduce((s, p) => s + Number(p.sportsbookProj ?? p.improvedProj ?? 0), 0).toFixed(2)),
+          combinedProj: Number(tPlayers.reduce((s, p) => s + (p.improvedProj || 0), 0).toFixed(2)),
+          indepSd: Number(groupIndepSd.toFixed(2)),
+          corrSd: Number(groupTotalSd.toFixed(2)),
+          sdShiftPts: Number((groupTotalSd - groupIndepSd).toFixed(2)),
+          pairCovPts2: Number(groupPairCov.toFixed(2)),
+          macroConcVarPts2: Number(macroConcVar.toFixed(2)),
+          netVarShiftPts2: Number((groupPairCov + macroConcVar).toFixed(2)),
+          pairDetails,
+          players: tPlayers.map((p) => ({
+            playerId: p.playerId,
+            shortName: p.shortName,
+            fullName: p.fullName,
+            position: p.position,
+            canonicalPos: p.canonicalPos,
+            slot: p.slot,
+            improvedProj: p.improvedProj,
+            sportsbookProj: p.sportsbookProj
+          }))
+        });
+      }
+
+      const exactVar = Math.max(4.0, indepVar + pairCovVar + totalTeamConcVar);
+      const indepSd = Math.sqrt(Math.max(1.0, indepVar));
 
       const activeIds = new Int32Array(simIds);
       let h2hWins = 0;
@@ -1873,22 +2050,33 @@
       let zeroWins = 0;
       let sumScore = 0;
       let sumSqScore = 0;
-      let sumDiffSq = 0;
       const samples = new Float32Array(numSims);
+      const indepSamples = includeDistribution ? new Float32Array(numSims) : null;
 
       for (let s = 0; s < numSims; s++) {
         let score = lockedSum;
         for (let j = 0; j < activeIds.length; j++) {
           score += playerTotalMatrix[activeIds[j]][s];
         }
+        // Apply implicit macro same-team concentration shock for any NFL team with 2+ offensive starters
+        for (let tc = 0; tc < teamConcShocks.length; tc++) {
+          score += teamConcShocks[tc].vec[s] * teamConcShocks[tc].scale;
+        }
         samples[s] = score;
         sumScore += score;
         sumSqScore += score * score;
 
+        if (includeDistribution) {
+          let indScore = lockedSum;
+          for (let j = 0; j < activeIds.length; j++) {
+            indScore += playerIndepMatrix[activeIds[j]][s];
+          }
+          indepSamples[s] = indScore;
+        }
+
         const oppS = oppTrialScores[s];
         const medS = fifthOtherScore[s];
         const diff = score - oppS;
-        sumDiffSq += diff * diff;
 
         const pH2H = 1 / (1 + Math.exp(-diff / 2.2));
         const pMed = 1 / (1 + Math.exp(-(score - medS) / 2.2));
@@ -1923,20 +2111,47 @@
       const prob1_1 = Math.max(0, 1 - prob2_0 - prob0_2);
       const expWins = h2hProb + medProb;
 
+      let distribution = null;
+      if (includeDistribution && indepSamples) {
+        indepSamples.sort();
+        distribution = {
+          gridX: distGridX,
+          correlatedDensity: computeKernelDensity(samples),
+          uncorrelatedDensity: computeKernelDensity(indepSamples),
+          oppDensity: oppDensityCurve,
+          indepP10: Number(indepSamples[Math.floor(numSims * 0.10)].toFixed(2)),
+          indepP90: Number(indepSamples[Math.floor(numSims * 0.90)].toFixed(2)),
+          oppMean: Number(oppMeanExact.toFixed(2)),
+          medCutoffMean: Number(medMeanExact.toFixed(2))
+        };
+      }
+
       return {
+        pureVegasPts: Number(pureVegasPts.toFixed(2)),
         expectedPts: Number(expectedPts.toFixed(2)),
         sleeperPts: Number(sleeperPts.toFixed(2)),
         simMean: Number(meanSim.toFixed(2)),
         simSd: Number(sdSim.toFixed(2)),
+        stdDev: Number(sdSim.toFixed(2)),
+        indepSd: Number(indepSd.toFixed(2)),
+        volatilityDeltaSd: Number((sdSim - indepSd).toFixed(2)),
+        pairCovVar: Number(pairCovVar.toFixed(2)),
+        teamConcVar: Number(totalTeamConcVar.toFixed(2)),
+        p05: Number(samples[Math.floor(numSims * 0.05)].toFixed(2)),
         p10: Number(samples[Math.floor(numSims * 0.10)].toFixed(2)),
+        p25: Number(samples[Math.floor(numSims * 0.25)].toFixed(2)),
         p50: Number(samples[Math.floor(numSims * 0.50)].toFixed(2)),
+        p75: Number(samples[Math.floor(numSims * 0.75)].toFixed(2)),
         p90: Number(samples[Math.floor(numSims * 0.90)].toFixed(2)),
+        p95: Number(samples[Math.floor(numSims * 0.95)].toFixed(2)),
         h2hWinProb: Number(h2hProb.toFixed(4)),
         medianWinProb: Number(medProb.toFixed(4)),
         prob2_0: Number(prob2_0.toFixed(4)),
         prob1_1: Number(prob1_1.toFixed(4)),
         prob0_2: Number(prob0_2.toFixed(4)),
-        expectedWeeklyWins: Number(expWins.toFixed(4))
+        expectedWeeklyWins: Number(expWins.toFixed(4)),
+        sameTeamGroups,
+        distribution
       };
     }
 
@@ -2054,7 +2269,7 @@
 
       const pool = slotPools[slotIdx];
       if (!pool || pool.length === 0) {
-        const fallback = { playerId: '0', fullName: 'Empty Slot', slot: slots[slotIdx], currentPts: 0, improvedProj: 0, sleeperProj: 0 };
+        const fallback = { playerId: '0', fullName: 'Empty Slot', shortName: 'Empty', team: 'FA', position: slots[slotIdx], slot: slots[slotIdx], currentPts: 0, improvedProj: 0, sleeperProj: 0, sportsbookProj: 0, underdogProj: null, owsSportsbookProj: null, vegasMarketProj: 0, floor: 0, ceiling: 0 };
         currentAssignment[slotIdx] = fallback;
         searchLineups(slotIdx + 1, runningProj);
         return;
@@ -2071,7 +2286,7 @@
         usedInSearch.delete(cand.playerId);
       }
       if (!triedAny) {
-        const fallback = { playerId: '0', fullName: 'Empty Slot', slot: slots[slotIdx], currentPts: 0, improvedProj: 0, sleeperProj: 0 };
+        const fallback = { playerId: '0', fullName: 'Empty Slot', shortName: 'Empty', team: 'FA', position: slots[slotIdx], slot: slots[slotIdx], currentPts: 0, improvedProj: 0, sleeperProj: 0, sportsbookProj: 0, underdogProj: null, owsSportsbookProj: null, vegasMarketProj: 0, floor: 0, ceiling: 0 };
         currentAssignment[slotIdx] = fallback;
         searchLineups(slotIdx + 1, runningProj);
       }
@@ -2079,14 +2294,8 @@
 
     searchLineups(0, 0);
 
-    // Ensure Current Set Lineup and Sleeper Max-Proj Lineup are also evaluated for comparison
-    const currentSetMetrics = evaluateCandidateLineup(rawStarters);
-    const sleeperMaxMetrics = evaluateCandidateLineup(sleeperMaxLineup);
-
-    // Evaluate all candidate lineups on the 10,000 CRN simulations
-    const evaluatedCandidates = candidateLineups.map((lineup) => {
-      const metrics = evaluateCandidateLineup(lineup);
-      // Analyze internal correlations & opponent correlations in this lineup
+    // Helper to analyze internal correlations & opponent correlations in any 14-slot lineup
+    function analyzeLineupCorrelations(lineup) {
       const stackPairs = [];
       const cannibalPairs = [];
       const oppCorrelations = [];
@@ -2098,10 +2307,28 @@
           const pB = lineup[j];
           if (!pB || pB.playerId === '0') continue;
           const c = computePairwisePlayerCorrelation(pA, pB);
+          const sameTeam = pA.team === pB.team;
           if (c >= 0.12) {
-            stackPairs.push({ pA: pA.shortName, pB: pB.shortName, teamA: pA.team, teamB: pB.team, corr: c });
+            stackPairs.push({
+              pA: pA.shortName,
+              pB: pB.shortName,
+              teamA: pA.team,
+              teamB: pB.team,
+              sameTeam,
+              label: sameTeam ? `${pA.team} Teammate Stack` : `${pA.team}/${pB.team} Game Shootout`,
+              corr: c
+            });
           } else if (c <= -0.10) {
-            cannibalPairs.push({ pA: pA.shortName, pB: pB.shortName, team: pA.team, corr: c });
+            cannibalPairs.push({
+              pA: pA.shortName,
+              pB: pB.shortName,
+              team: pA.team,
+              teamA: pA.team,
+              teamB: pB.team,
+              sameTeam,
+              label: sameTeam ? `${pA.team} Same-Team TD Split` : `${pA.team} vs ${pB.team} Opposing RB Script`,
+              corr: c
+            });
           }
         }
         if (oppRoster) {
@@ -2119,6 +2346,17 @@
           }
         }
       }
+      return { stackPairs, cannibalPairs, oppCorrelations };
+    }
+
+    // Ensure Current Set Lineup and Sleeper Max-Proj Lineup are also evaluated with full distributions for comparison
+    const currentSetMetrics = evaluateCandidateLineup(rawStarters, true);
+    const sleeperMaxMetrics = evaluateCandidateLineup(sleeperMaxLineup, true);
+
+    // Evaluate all candidate lineups on the 10,000 CRN simulations
+    const evaluatedCandidates = candidateLineups.map((lineup) => {
+      const metrics = evaluateCandidateLineup(lineup, false);
+      const { stackPairs, cannibalPairs, oppCorrelations } = analyzeLineupCorrelations(lineup);
 
       return {
         lineup,
@@ -2139,7 +2377,11 @@
     };
 
     evaluatedCandidates.sort(sortFn);
-    const rawOptimalCandidate = evaluatedCandidates[0] || { lineup: maxPtsLineup, metrics: evaluateCandidateLineup(maxPtsLineup), stackPairs: [], cannibalPairs: [], oppCorrelations: [] };
+    const rawOptimalCandidate = evaluatedCandidates[0] || {
+      lineup: maxPtsLineup,
+      metrics: evaluateCandidateLineup(maxPtsLineup, true),
+      ...analyzeLineupCorrelations(maxPtsLineup)
+    };
 
     // Align optimal lineup slot assignments with current starters so continuing starters stay in their original slots whenever valid
     function alignLineupSlotsWithCurrent(optLineup, currStarters) {
@@ -2192,7 +2434,7 @@
 
       if (bestMatchScore >= 0) {
         return slots.map((slotName, idx) =>
-          bestSlotAssign[idx] || { playerId: '0', fullName: 'Empty Slot', shortName: 'Empty', team: 'FA', position: slotName, slot: slotName, currentPts: 0, improvedProj: 0, sleeperProj: 0 }
+          bestSlotAssign[idx] || { playerId: '0', fullName: 'Empty Slot', shortName: 'Empty', team: 'FA', position: slotName, slot: slotName, currentPts: 0, improvedProj: 0, sleeperProj: 0, sportsbookProj: 0, underdogProj: null, owsSportsbookProj: null, vegasMarketProj: 0, floor: 0, ceiling: 0 }
         );
       }
       return optLineup;
@@ -2201,64 +2443,75 @@
     const alignedOptimalLineup = alignLineupSlotsWithCurrent(rawOptimalCandidate.lineup, rawStarters);
     const optimalCandidate = {
       ...rawOptimalCandidate,
-      lineup: alignedOptimalLineup
+      lineup: alignedOptimalLineup,
+      metrics: evaluateCandidateLineup(alignedOptimalLineup, true)
     };
 
     // Identify true swaps between Optimal Lineup and Current Set Lineup
     const optimalStarterIds = new Set(optimalCandidate.lineup.map((p) => p.playerId).filter((id) => id !== '0'));
     const currentStarterIds = new Set(rawStarters.map((p) => p.playerId).filter((id) => id !== '0'));
 
-    const recommendedSwaps = [];
-    for (let i = 0; i < slots.length; i++) {
-      const currP = rawStarters[i];
-      const optP = optimalCandidate.lineup[i];
-      if (!optP) continue;
-      const currId = currP ? currP.playerId : '0';
-      const optId = optP ? optP.playerId : '0';
-      if (currId !== optId) {
-        // Build human-readable quantitative reasons for this swap
-        const reasons = [];
-        const projDelta = Number(((optP.improvedProj || 0) - (currP ? currP.improvedProj || 0 : 0)).toFixed(2));
-        if (currId === '0' || (currP && currP.gameStatus === 'bye') || (currP && ['Out', 'IR', 'Doubtful'].includes(currP.injuryStatus))) {
-          reasons.push(`Fills open/inactive ${slots[i]} slot (+${projDelta.toFixed(2)} pts)`);
-        } else if (projDelta > 0) {
-          reasons.push(`+${projDelta.toFixed(2)} blended market projection edge`);
-        }
-        if (optP.sportsbookProj && optP.sportsbookProj > optP.sleeperProj + 0.4) {
-          reasons.push(`Sportsbook props (${optP.sportsbookProj.toFixed(1)}) bullish vs Sleeper (${optP.sleeperProj.toFixed(1)})`);
-        }
-        // Check if optP stacks with another optimal starter
-        for (const otherP of optimalCandidate.lineup) {
-          if (!otherP || otherP.playerId === '0' || otherP.playerId === optP.playerId) continue;
-          const c = computePairwisePlayerCorrelation(optP, otherP);
-          if (c >= 0.14) {
-            reasons.push(`Positive correlation stack with ${otherP.shortName} (ρ = +${c.toFixed(2)})`);
+    function computeSwapsAgainstBaseline(candidateLineup, baselineLineup) {
+      const candIds = new Set(candidateLineup.map((p) => p?.playerId).filter((id) => id && id !== '0'));
+      const baseIds = new Set(baselineLineup.map((p) => p?.playerId).filter((id) => id && id !== '0'));
+      const swaps = [];
+      for (let i = 0; i < slots.length; i++) {
+        const currP = baselineLineup[i];
+        const optP = candidateLineup[i];
+        if (!optP) continue;
+        const currId = currP ? currP.playerId : '0';
+        const optId = optP ? optP.playerId : '0';
+        if (currId !== optId) {
+          const reasons = [];
+          const projDelta = Number(((optP.improvedProj || 0) - (currP ? currP.improvedProj || 0 : 0)).toFixed(2));
+          if (currId === '0' || (currP && currP.gameStatus === 'bye') || (currP && ['Out', 'IR', 'Doubtful'].includes(currP.injuryStatus))) {
+            reasons.push(`Fills open/inactive ${slots[i]} slot (+${projDelta.toFixed(2)} pts)`);
+          } else if (projDelta > 0) {
+            reasons.push(`+${projDelta.toFixed(2)} Vegas/market projection edge`);
+          } else if (projDelta < 0) {
+            reasons.push(`${projDelta.toFixed(2)} pts projection shift`);
           }
-        }
-        // Check if currP had negative cannibalization with another optimal starter
-        if (currP && currId !== '0') {
-          for (const otherP of optimalCandidate.lineup) {
+          if (optP.sportsbookProj && optP.sportsbookProj > optP.sleeperProj + 0.4) {
+            reasons.push(`Vegas props (${optP.sportsbookProj.toFixed(1)}) bullish vs Sleeper (${optP.sleeperProj.toFixed(1)})`);
+          }
+          for (const otherP of candidateLineup) {
             if (!otherP || otherP.playerId === '0' || otherP.playerId === optP.playerId) continue;
-            const cOld = computePairwisePlayerCorrelation(currP, otherP);
-            if (cOld <= -0.10) {
-              reasons.push(`Avoids ${currP.team} same-team cannibalization with ${otherP.shortName} (ρ = ${cOld.toFixed(2)})`);
+            const c = computePairwisePlayerCorrelation(optP, otherP);
+            if (c >= 0.14) {
+              reasons.push(`Positive correlation stack with ${otherP.shortName} (ρ = +${c.toFixed(2)})`);
             }
           }
-        }
+          if (currP && currId !== '0') {
+            for (const otherP of candidateLineup) {
+              if (!otherP || otherP.playerId === '0' || otherP.playerId === optP.playerId) continue;
+              const cOld = computePairwisePlayerCorrelation(currP, otherP);
+              if (cOld <= -0.10) {
+                if (currP.team === otherP.team) {
+                  reasons.push(`Avoids ${currP.team} same-team cannibalization with ${otherP.shortName} (ρ = ${cOld.toFixed(2)})`);
+                } else {
+                  reasons.push(`Avoids ${currP.team}/${otherP.team} opposing RB game-script conflict with ${otherP.shortName} (ρ = ${cOld.toFixed(2)})`);
+                }
+              }
+            }
+          }
 
-        recommendedSwaps.push({
-          slotIndex: i,
-          slot: slots[i],
-          outPlayer: currP,
-          inPlayer: optP,
-          isTrueAddition: !currentStarterIds.has(optId),
-          isTrueRemoval: currId === '0' || !optimalStarterIds.has(currId),
-          projDelta,
-          reasons,
-          summaryReason: reasons.join(' • ') || 'Optimizes joint simulation win probability'
-        });
+          swaps.push({
+            slotIndex: i,
+            slot: slots[i],
+            outPlayer: currP,
+            inPlayer: optP,
+            isTrueAddition: !baseIds.has(optId),
+            isTrueRemoval: currId === '0' || !candIds.has(currId),
+            projDelta,
+            reasons,
+            summaryReason: reasons.join(' • ') || 'Optimizes joint simulation win probability & volatility'
+          });
+        }
       }
+      return swaps;
     }
+
+    const recommendedSwaps = computeSwapsAgainstBaseline(optimalCandidate.lineup, rawStarters);
 
     // Helper to check if a set of active players can legally fit into the league's 14 starter slots
     function checkLineupSlotValidity(activePlayersList) {
@@ -2289,257 +2542,132 @@
       };
     }
 
-    // Build smart presets for the "Best K of N" Same-Team / Close-Projection Conflict Analyzer
-    const skillPool = activePool.filter((p) => ['RB', 'WR', 'TE'].includes(p.canonicalPos));
-    const qbPool = activePool.filter((p) => p.canonicalPos === 'QB');
-    const tePool = activePool.filter((p) => p.canonicalPos === 'TE');
+    // Dynamic custom lineup evaluator (executes in <2ms on the precomputed 10,000 Cholesky & Independent simulation matrices)
+    function evaluateCustomLineup(customLineupInput) {
+      const resolvedLineup = slots.map((slotName, idx) => {
+        const item = customLineupInput[idx];
+        if (!item) {
+          return { playerId: '0', fullName: 'Empty Slot', shortName: 'Empty', team: 'FA', position: slotName, slot: slotName, currentPts: 0, improvedProj: 0, sleeperProj: 0, sportsbookProj: 0, vegasMarketProj: 0, floor: 0, ceiling: 0 };
+        }
+        const pid = typeof item === 'string' ? item : String(item.playerId || '0');
+        const fullPlayer = allRosterPlayersMap.get(pid) || (typeof item === 'object' ? item : null);
+        if (!fullPlayer || pid === '0') {
+          return { playerId: '0', fullName: 'Empty Slot', shortName: 'Empty', team: 'FA', position: slotName, slot: slotName, currentPts: 0, improvedProj: 0, sleeperProj: 0, sportsbookProj: 0, vegasMarketProj: 0, floor: 0, ceiling: 0 };
+        }
+        return { ...fullPlayer, slot: slotName };
+      });
 
-    // Detect same-team pairs among borderline skill players (ranked #3..#11)
-    const borderlineSkill = skillPool.slice(2, Math.min(10, skillPool.length));
-    let sameTeamTriadIds = null;
-    for (let i = 0; i < borderlineSkill.length; i++) {
-      for (let j = i + 1; j < borderlineSkill.length; j++) {
-        if (borderlineSkill[i].team === borderlineSkill[j].team) {
-          const p1 = borderlineSkill[i];
-          const p2 = borderlineSkill[j];
-          const avgProj = 0.5 * (p1.improvedProj + p2.improvedProj);
-          // Prefer a 3rd player from a different team who is the top bench contender (or borderline starter)
-          // and whose position ensures all 2-of-3 combinations are slot-valid
-          const baseWithoutPair = optimalCandidate.lineup.filter(
-            (p) => p && p.playerId !== '0' && p.playerId !== p1.playerId && p.playerId !== p2.playerId
-          );
-          const otherCands = borderlineSkill
-            .filter((p) => p.playerId !== p1.playerId && p.playerId !== p2.playerId && p.team !== p1.team)
-            .sort((a, b) => {
-              // Prefer bench contenders so 2 of the 3 are starters and 1 is the top bench challenger
-              const aInOpt = optimalStarterIds.has(a.playerId) ? 1 : 0;
-              const bInOpt = optimalStarterIds.has(b.playerId) ? 1 : 0;
-              const aValidAll = (
-                checkLineupSlotValidity([...baseWithoutPair, p1, a]).isValid &&
-                checkLineupSlotValidity([...baseWithoutPair, p2, a]).isValid
-              ) ? 0 : 1;
-              const bValidAll = (
-                checkLineupSlotValidity([...baseWithoutPair, p1, b]).isValid &&
-                checkLineupSlotValidity([...baseWithoutPair, p2, b]).isValid
-              ) ? 0 : 1;
-              if (aValidAll !== bValidAll) return aValidAll - bValidAll;
-              if (aInOpt !== bInOpt) return aInOpt - bInOpt;
-              return Math.abs(a.improvedProj - avgProj) - Math.abs(b.improvedProj - avgProj);
-            });
-          const thirdCand = otherCands[0];
-          if (thirdCand) {
-            sameTeamTriadIds = [p1.playerId, p2.playerId, thirdCand.playerId];
-            break;
+      const metrics = evaluateCandidateLineup(resolvedLineup, true);
+      const { stackPairs, cannibalPairs, oppCorrelations } = analyzeLineupCorrelations(resolvedLineup);
+      const swapsVsCurrent = computeSwapsAgainstBaseline(resolvedLineup, rawStarters);
+      const swapsVsOptimal = computeSwapsAgainstBaseline(resolvedLineup, optimalCandidate.lineup);
+      const slotValidity = checkLineupSlotValidity(resolvedLineup);
+
+      return {
+        lineup: resolvedLineup,
+        metrics,
+        stackPairs,
+        cannibalPairs,
+        oppCorrelations,
+        swapsVsCurrent,
+        swapsVsOptimal,
+        slotValidity
+      };
+    }
+
+    // Build Dynamic Lineup Presets so the user can 1-click inspect different lineup archetypes & same-team concentration profiles
+    const ceilingStackCand = [...evaluatedCandidates].sort(
+      (a, b) => (b.metrics.p90 + b.metrics.volatilityDeltaSd * 1.5) - (a.metrics.p90 + a.metrics.volatilityDeltaSd * 1.5)
+    )[0] || optimalCandidate;
+
+    const floorDiversifiedCand = [...evaluatedCandidates].sort(
+      (a, b) => (b.metrics.p10 - b.metrics.volatilityDeltaSd * 1.5) - (a.metrics.p10 - a.metrics.volatilityDeltaSd * 1.5)
+    )[0] || optimalCandidate;
+
+    // Construct 3-Player Same-Team Concentration Test Lineups for any NFL team with >= 3 active offensive players on the roster
+    const teamOffPoolMap = new Map();
+    for (const p of activePool) {
+      if (!p.team || p.team === 'FA' || ['DL', 'LB', 'DB'].includes(p.canonicalPos)) continue;
+      if (!teamOffPoolMap.has(p.team)) teamOffPoolMap.set(p.team, []);
+      teamOffPoolMap.get(p.team).push(p);
+    }
+
+    const lineupPresets = [
+      {
+        id: 'optimal',
+        label: '🏆 #1 Optimal Vegas Lineup',
+        subtitle: `Max Expected Wins (${optimalCandidate.metrics.expectedWeeklyWins.toFixed(3)}) • ${optimalCandidate.metrics.expectedPts.toFixed(1)} pts`,
+        lineup: alignedOptimalLineup
+      },
+      {
+        id: 'current',
+        label: '📋 Current Sleeper Lineup',
+        subtitle: `Your Live Starters (${currentSetMetrics.expectedWeeklyWins.toFixed(3)} E[Wins]) • ${currentSetMetrics.expectedPts.toFixed(1)} pts`,
+        lineup: rawStarters
+      },
+      {
+        id: 'ceiling_stack',
+        label: '🚀 Max Ceiling / Stack Lineup',
+        subtitle: `90th Percentile Ceiling: ${ceilingStackCand.metrics.p90.toFixed(1)} pts (σ = ${ceilingStackCand.metrics.stdDev.toFixed(1)})`,
+        lineup: alignLineupSlotsWithCurrent(ceilingStackCand.lineup, rawStarters)
+      },
+      {
+        id: 'floor_diversified',
+        label: '🛡️ Diversified Floor Lineup',
+        subtitle: `10th Percentile Floor: ${floorDiversifiedCand.metrics.p10.toFixed(1)} pts (σ = ${floorDiversifiedCand.metrics.stdDev.toFixed(1)})`,
+        lineup: alignLineupSlotsWithCurrent(floorDiversifiedCand.lineup, rawStarters)
+      }
+    ];
+
+    const threeStackTeams = [...teamOffPoolMap.entries()]
+      .filter(([, tmPlayers]) => tmPlayers.length >= 3)
+      .sort((a, b) => {
+        const sumA = a[1].slice(0, 3).reduce((s, p) => s + (p.improvedProj || 0), 0);
+        const sumB = b[1].slice(0, 3).reduce((s, p) => s + (p.improvedProj || 0), 0);
+        return sumB - sumA;
+      });
+
+    for (const [tm, tmPlayers] of threeStackTeams) {
+      const top3 = tmPlayers.slice(0, 3);
+      const tempLineup = alignedOptimalLineup.map((p) => ({ ...p }));
+      const presentIds = new Set(tempLineup.map((p) => p.playerId));
+      for (const stackP of top3) {
+        if (presentIds.has(stackP.playerId)) continue;
+        let bestReplaceIdx = -1;
+        let lowestPts = Infinity;
+        for (let s = 0; s < slots.length; s++) {
+          if (!isEligibleForSlot(stackP, slots[s])) continue;
+          const currInSlot = tempLineup[s];
+          if (currInSlot && currInSlot.team === tm) continue;
+          const pts = currInSlot ? currInSlot.improvedProj || 0 : 0;
+          if (pts < lowestPts) {
+            lowestPts = pts;
+            bestReplaceIdx = s;
           }
         }
-      }
-      if (sameTeamTriadIds) break;
-    }
-
-    const rbWrPool = activePool.filter((p) => ['RB', 'WR'].includes(p.canonicalPos));
-    const flexCluster5Ids = rbWrPool.slice(4, 9).map((p) => p.playerId);
-    // For 2-of-4 (WR3 + FLEX2), take lowest RB starter + lowest WR starter + top RB bench + top WR bench
-    const rbStarters = rbWrPool.filter((p) => p.canonicalPos === 'RB' && optimalStarterIds.has(p.playerId));
-    const wrStarters = rbWrPool.filter((p) => p.canonicalPos === 'WR' && optimalStarterIds.has(p.playerId));
-    const rbBench = rbWrPool.filter((p) => p.canonicalPos === 'RB' && !optimalStarterIds.has(p.playerId));
-    const wrBench = rbWrPool.filter((p) => p.canonicalPos === 'WR' && !optimalStarterIds.has(p.playerId));
-    const flexCluster4Ids = [
-      rbStarters[rbStarters.length - 1]?.playerId,
-      wrStarters[wrStarters.length - 1]?.playerId,
-      rbBench[0]?.playerId,
-      wrBench[0]?.playerId
-    ].filter(Boolean);
-
-    const analyzerPresets = [];
-    if (sameTeamTriadIds && sameTeamTriadIds.length === 3) {
-      const triadNames = sameTeamTriadIds.map((id) => allRosterPlayersMap.get(String(id))?.shortName).filter(Boolean);
-      analyzerPresets.push({
-        id: 'same_team_2_of_3',
-        label: `Best 2 of 3 (Same-Team Conflict: ${triadNames.join(' / ')})`,
-        playerIds: sameTeamTriadIds,
-        chooseK: 2
-      });
-    }
-    if (flexCluster5Ids.length >= 4) {
-      analyzerPresets.push({
-        id: 'flex_cluster_3_of_5',
-        label: `Best 3 of ${flexCluster5Ids.length} (Borderline WR / FLEX Cluster)`,
-        playerIds: flexCluster5Ids,
-        chooseK: 3
-      });
-    }
-    if (flexCluster4Ids.length >= 4) {
-      analyzerPresets.push({
-        id: 'flex_cluster_2_of_4',
-        label: `Best 2 of 4 (WR3 + FLEX2 Decision)`,
-        playerIds: flexCluster4Ids,
-        chooseK: 2
-      });
-    }
-    if (qbPool.length >= 3) {
-      analyzerPresets.push({
-        id: 'qb_superflex_2_of_n',
-        label: `Best 2 of ${qbPool.length} (QB + Superflex Decision)`,
-        playerIds: qbPool.map((p) => p.playerId),
-        chooseK: 2
-      });
-    }
-    if (tePool.length >= 2) {
-      analyzerPresets.push({
-        id: 'te_1_of_2',
-        label: `Best 1 of ${tePool.length} (Tight End Decision)`,
-        playerIds: tePool.map((p) => p.playerId),
-        chooseK: 1
-      });
-    }
-
-    // "Best K of N" Subset / Same-Team Conflict Analyzer:
-    let subsetPoolIds = options.subsetPlayerIds || null;
-    let subsetChooseK = options.subsetChooseK || null;
-
-    if (!subsetPoolIds || subsetPoolIds.length < 2) {
-      // Default to Preset 0 (Best 2 of 3 Same-Team Conflict if present, otherwise Borderline WR/FLEX cluster)
-      if (analyzerPresets.length > 0) {
-        subsetPoolIds = analyzerPresets[0].playerIds;
-        subsetChooseK = analyzerPresets[0].chooseK;
-      } else if (flexCluster5Ids.length >= 4) {
-        subsetPoolIds = flexCluster5Ids;
-        subsetChooseK = 3;
-      } else {
-        const fallbackSkill = skillPool.slice(2, 7);
-        subsetPoolIds = fallbackSkill.map((p) => p.playerId);
-        subsetChooseK = Math.min(2, Math.max(1, fallbackSkill.length - 1));
-      }
-    } else if (!subsetChooseK) {
-      subsetChooseK = Math.min(2, Math.max(1, subsetPoolIds.length - 1));
-    }
-
-    const subsetPlayers = subsetPoolIds
-      .map((id) => allRosterPlayersMap.get(String(id)))
-      .filter(Boolean);
-
-    subsetChooseK = Math.min(subsetPlayers.length, Math.max(1, Number(subsetChooseK) || 2));
-
-    // Construct an exact fixed core of (activeStarterCount - K) players outside `subsetPlayers`
-    // so that every C(N, K) combination is evaluated on the exact same 14-slot lineup baseline!
-    const subsetIdSet = new Set(subsetPlayers.map((p) => p.playerId));
-    const activeOptimalStarters = optimalCandidate.lineup.filter((p) => p && p.playerId && p.playerId !== '0');
-    const targetCoreSize = Math.max(0, activeOptimalStarters.length - subsetChooseK);
-
-    let fixedCoreLineup = activeOptimalStarters.filter((p) => !subsetIdSet.has(p.playerId));
-
-    if (fixedCoreLineup.length > targetCoreSize) {
-      // Need to vacate (fixedCoreLineup.length - targetCoreSize) slots from fixedCoreLineup:
-      // Prefer vacating the lowest-projected unlocked starters that share positions with subsetPlayers
-      const subsetPosSet = new Set(subsetPlayers.map((p) => p.canonicalPos));
-      fixedCoreLineup.sort((a, b) => {
-        const aLocked = lockedPlayerIds.has(a.playerId) ? 1 : 0;
-        const bLocked = lockedPlayerIds.has(b.playerId) ? 1 : 0;
-        if (aLocked !== bLocked) return bLocked - aLocked;
-        const aSamePos = subsetPosSet.has(a.canonicalPos) ? 0 : 1;
-        const bSamePos = subsetPosSet.has(b.canonicalPos) ? 0 : 1;
-        if (aSamePos !== bSamePos) return bSamePos - aSamePos;
-        return b.improvedProj - a.improvedProj;
-      });
-      fixedCoreLineup = fixedCoreLineup.slice(0, targetCoreSize);
-    } else if (fixedCoreLineup.length < targetCoreSize) {
-      // Need to backfill (targetCoreSize - fixedCoreLineup.length) players from activePool outside subsetIdSet
-      const coreIds = new Set(fixedCoreLineup.map((p) => p.playerId));
-      const subsetPosSet = new Set(subsetPlayers.map((p) => p.canonicalPos));
-      const backfillCandidates = activePool
-        .filter((p) => !subsetIdSet.has(p.playerId) && !coreIds.has(p.playerId))
-        .sort((a, b) => {
-          const aSamePos = subsetPosSet.has(a.canonicalPos) ? 1 : 0;
-          const bSamePos = subsetPosSet.has(b.canonicalPos) ? 1 : 0;
-          if (aSamePos !== bSamePos) return bSamePos - aSamePos;
-          return b.improvedProj - a.improvedProj;
-        });
-      for (const cand of backfillCandidates) {
-        if (fixedCoreLineup.length >= targetCoreSize) break;
-        fixedCoreLineup.push(cand);
-        coreIds.add(cand.playerId);
-      }
-    }
-
-    const subsetComparison = [];
-
-    function generateSubsets(arr, k, start = 0, curr = []) {
-      if (curr.length === k) {
-        const combined = [...fixedCoreLineup, ...curr];
-        const m = evaluateCandidateLineup(combined);
-        // Compute internal pairwise correlations within `curr` AND with `fixedCoreLineup`
-        const pairCorrs = [];
-        let sameTeamCount = 0;
-        for (let i = 0; i < curr.length; i++) {
-          for (let j = i + 1; j < curr.length; j++) {
-            const c = computePairwisePlayerCorrelation(curr[i], curr[j]);
-            if (curr[i].team === curr[j].team) sameTeamCount++;
-            pairCorrs.push({
-              pair: `${curr[i].shortName} (${curr[i].team}) + ${curr[j].shortName} (${curr[j].team})`,
-              sameTeam: curr[i].team === curr[j].team,
-              sameGame: Boolean(curr[i].gameId && curr[i].gameId === curr[j].gameId),
-              corr: c
-            });
-          }
+        if (bestReplaceIdx >= 0) {
+          presentIds.delete(tempLineup[bestReplaceIdx]?.playerId);
+          tempLineup[bestReplaceIdx] = { ...stackP, slot: slots[bestReplaceIdx] };
+          presentIds.add(stackP.playerId);
         }
-        // Also check correlations between `curr` and locked core starters (e.g. QB-WR stack or RB-WR cannibalization)
-        const coreCorrs = [];
-        for (const p of curr) {
-          for (const coreP of fixedCoreLineup) {
-            const c = computePairwisePlayerCorrelation(p, coreP);
-            if (Math.abs(c) >= 0.10) {
-              if (p.team === coreP.team && c < 0) sameTeamCount++;
-              coreCorrs.push({
-                pair: `${p.shortName} (${p.team}) ↔ ${coreP.shortName} (${coreP.team})`,
-                sameTeam: p.team === coreP.team,
-                corr: c
-              });
-            }
-          }
-        }
-
-        const isOptimalCombo = curr.every((p) => optimalStarterIds.has(p.playerId));
-        const slotFit = checkLineupSlotValidity(combined);
-
-        subsetComparison.push({
-          players: curr.map((p) => ({
-            playerId: p.playerId,
-            shortName: p.shortName,
-            fullName: p.fullName,
-            team: p.team,
-            position: p.position,
-            improvedProj: p.improvedProj,
-            sleeperProj: p.sleeperProj,
-            sportsbookProj: p.sportsbookProj
-          })),
-          label: curr.map((p) => `${p.shortName} (${p.team} ${p.position})`).join(' + '),
-          subsetExpectedPts: Number(curr.reduce((a, b) => a + b.improvedProj, 0).toFixed(2)),
-          subsetSleeperPts: Number(curr.reduce((a, b) => a + b.sleeperProj, 0).toFixed(2)),
-          sameTeamCount,
-          pairCorrs,
-          coreCorrs,
-          isOptimalCombo,
-          slotFit,
-          metrics: m
-        });
-        return;
       }
-      for (let i = start; i < arr.length; i++) {
-        curr.push(arr[i]);
-        generateSubsets(arr, k, i + 1, curr);
-        curr.pop();
-      }
-    }
-
-    if (subsetPlayers.length >= subsetChooseK && subsetChooseK >= 1) {
-      generateSubsets(subsetPlayers, subsetChooseK);
-      subsetComparison.sort((a, b) => {
-        const validA = a.slotFit?.isValid ? 1 : 0;
-        const validB = b.slotFit?.isValid ? 1 : 0;
-        if (validA !== validB) return validB - validA;
-        return sortFn(a, b);
+      const concEval = evaluateCandidateLineup(tempLineup, false);
+      lineupPresets.push({
+        id: `same_team_3stack_${tm}`,
+        label: `⚡ ${tm} 3-Player Stack (${top3.map((p) => p.shortName).join(' + ')})`,
+        subtitle: `${concEval.expectedPts.toFixed(1)} pts • σ = ${concEval.stdDev.toFixed(1)} (Δσ ${concEval.volatilityDeltaSd >= 0 ? '+' : ''}${concEval.volatilityDeltaSd.toFixed(2)} pts)`,
+        lineup: tempLineup
       });
     }
+
+    const topCandidatesWithDist = evaluatedCandidates.slice(0, 6).map((c) => {
+      const aligned = alignLineupSlotsWithCurrent(c.lineup, rawStarters);
+      return {
+        ...c,
+        lineup: aligned,
+        metrics: evaluateCandidateLineup(aligned, true)
+      };
+    });
 
     // Build full correlation matrix for all active skill/QB candidates on the target roster for visual display
     const displayPool = activePool.slice(0, 12);
@@ -2563,6 +2691,7 @@
       computeTimeMs: Date.now() - startMs,
       numSims,
       objective,
+      slots,
       targetRosterId: targetRoster.rosterId,
       targetTeamName: targetRoster.teamName,
       oppTeamName: oppRoster ? oppRoster.teamName : 'Opponent',
@@ -2572,22 +2701,11 @@
       sleeperMaxLineup,
       sleeperMaxMetrics,
       optimalCandidate,
-      topCandidates: evaluatedCandidates.slice(0, 8),
+      topCandidates: topCandidatesWithDist,
+      lineupPresets,
+      evaluateCustomLineup,
+      isEligibleForSlot,
       recommendedSwaps,
-      subsetAnalyzer: {
-        presets: analyzerPresets,
-        availableCandidates: activePool,
-        selectedPlayerIds: subsetPlayers.map((p) => p.playerId),
-        chooseK: subsetChooseK,
-        fixedCorePlayers: fixedCoreLineup.map((p) => ({
-          playerId: p.playerId,
-          shortName: p.shortName,
-          team: p.team,
-          position: p.position,
-          improvedProj: p.improvedProj
-        })),
-        combinations: subsetComparison
-      },
       rosterCorrMatrix,
       allRosterPlayers: rosterPool.sort((a, b) => b.improvedProj - a.improvedProj)
     };
@@ -2734,7 +2852,7 @@
     });
   }
 
-  async function getLeagueLiveState(leagueId = DEFAULT_LEAGUE_ID, requestedWeek = null, forceRefresh = false, autoSubByeOut = false, marketWeight = 0.75, marketSource = 'consensus') {
+  async function getLeagueLiveState(leagueId = DEFAULT_LEAGUE_ID, requestedWeek = null, forceRefresh = false, autoSubByeOut = false, marketWeight = 1.0, marketSource = 'consensus') {
     const startMs = Date.now();
     const ttl = forceRefresh ? 0 : 8000;
 
@@ -2842,6 +2960,31 @@
     const scoringSettings = league.scoring_settings || {};
     const starterSlots = (league.roster_positions || []).filter((p) => p !== 'BN');
 
+    const allRosteredIds = new Set();
+    for (const r of rosters) {
+      for (const pid of (r.players || [])) allRosteredIds.add(String(pid));
+      for (const pid of (r.starters || [])) if (pid && String(pid) !== '0') allRosteredIds.add(String(pid));
+    }
+    for (const m of matchups) {
+      for (const pid of (m.players || [])) allRosteredIds.add(String(pid));
+      for (const pid of (m.starters || [])) if (pid && String(pid) !== '0') allRosteredIds.add(String(pid));
+    }
+
+    const buildLeaguePlayer = (pidStr, actualPts, slotName) => {
+      const pEntry = projMap.get(pidStr);
+      const sEntry = statMap.get(pidStr);
+      const pInfo = pEntry?.player || sEntry?.player || {};
+      const fullName = `${pInfo.first_name || ''} ${pInfo.last_name || ''}`.trim();
+      const normKey = normalizePlayerName(fullName);
+      const sbEntry = sbPropsByName.get(normKey) || null;
+      const udEntry = (isCurrentWeek && udByName) ? (udByName.get(normKey) || null) : null;
+      const team = normalizeTeamCode(pEntry?.team || sEntry?.team || pInfo.team || 'FA');
+      const gs = gameStatesByTeam[team] || null;
+      const modeled = modelPlayer(pidStr, actualPts, pEntry, sEntry, gs, scoringSettings, sbEntry, marketWeight, udEntry, marketSource);
+      modeled.slot = slotName;
+      return modeled;
+    };
+
     let rostersData = matchups.map((m) => {
       const r = rosterMap.get(m.roster_id) || {};
       const u = userMap.get(r.owner_id) || {};
@@ -2849,35 +2992,21 @@
       const ownerName = u.display_name || `User ${m.roster_id}`;
       const avatarUrl = u.metadata?.avatar || (u.avatar ? `https://sleepercdn.com/avatars/thumbs/${u.avatar}` : null);
 
-      const starterIds = (m.starters && m.starters.length ? m.starters : (r.starters || [])).map(String);
-      const allPlayerIds = (m.players && m.players.length ? m.players : (r.players || [])).map(String);
+      // For current week, prefer live roster starters/players when updated on Sleeper
+      const starterIds = (isCurrentWeek && r.starters && r.starters.length ? r.starters : (m.starters && m.starters.length ? m.starters : (r.starters || []))).map(String);
+      const allPlayerIds = Array.from(new Set([...(r.players || []).map(String), ...(m.players || []).map(String)]));
       const starterPts = m.starters_points || [];
       const playersPoints = m.players_points || {};
 
-      const buildModeledPlayer = (pidStr, actualPts, slotName) => {
-        const pEntry = projMap.get(pidStr);
-        const sEntry = statMap.get(pidStr);
-        const pInfo = pEntry?.player || sEntry?.player || {};
-        const fullName = `${pInfo.first_name || ''} ${pInfo.last_name || ''}`.trim();
-        const normKey = normalizePlayerName(fullName);
-        const sbEntry = sbPropsByName.get(normKey) || null;
-        const udEntry = (isCurrentWeek && udByName) ? (udByName.get(normKey) || null) : null;
-        const team = normalizeTeamCode(pEntry?.team || sEntry?.team || pInfo.team || 'FA');
-        const gs = gameStatesByTeam[team] || null;
-        const modeled = modelPlayer(pidStr, actualPts, pEntry, sEntry, gs, scoringSettings, sbEntry, marketWeight, udEntry, marketSource);
-        modeled.slot = slotName;
-        return modeled;
-      };
-
       const starters = starterIds.map((pidStr, idx) => {
         const actualPts = starterPts[idx] !== undefined ? starterPts[idx] : (playersPoints[pidStr] ?? 0);
-        return buildModeledPlayer(pidStr, actualPts, starterSlots[idx] || 'FLEX');
+        return buildLeaguePlayer(pidStr, actualPts, starterSlots[idx] || 'FLEX');
       });
 
       const starterSet = new Set(starterIds.filter((id) => id !== '0'));
       const benchIds = allPlayerIds.filter((pid) => !starterSet.has(pid));
       const bench = benchIds
-        .map((pidStr) => buildModeledPlayer(pidStr, playersPoints[pidStr] ?? 0, 'BN'))
+        .map((pidStr) => buildLeaguePlayer(pidStr, playersPoints[pidStr] ?? 0, 'BN'))
         .sort((a, b) => b.improvedProj - a.improvedProj);
 
       return {
@@ -2899,6 +3028,24 @@
       };
     });
 
+    // Build Waiver Wire IDP Pool (All unrostered DL, LB, DB players with Week projections / Underdog IDP Props / Vegas lines)
+    const waiverIdpPlayers = [];
+    for (const [pidStr, pEntry] of projMap.entries()) {
+      if (allRosteredIds.has(pidStr)) continue;
+      const pInfo = pEntry?.player || {};
+      const cPos = canonicalPos(pInfo.position);
+      const fPos = (pInfo.fantasy_positions || [pInfo.position]).map(canonicalPos);
+      const isIdp = ['DL', 'LB', 'DB'].includes(cPos) || fPos.some((fp) => ['DL', 'LB', 'DB'].includes(fp));
+      if (!isIdp) continue;
+      const prePts = computeCustomPoints(pEntry.stats || {}, scoringSettings);
+      if (prePts < 2.2) continue;
+      const modeled = buildLeaguePlayer(pidStr, 0, cPos);
+      if (modeled.improvedProj >= 2.2 || (modeled.sportsbookProj || 0) >= 2.2) {
+        waiverIdpPlayers.push(modeled);
+      }
+    }
+    waiverIdpPlayers.sort((a, b) => (b.sportsbookProj ?? b.improvedProj) - (a.sportsbookProj ?? a.improvedProj) || b.improvedProj - a.improvedProj);
+
     if (autoSubByeOut) {
       rostersData = applyAutoSubForByeOrOut(rostersData);
     }
@@ -2911,6 +3058,7 @@
       marketSource,
       sportsbookWeekLoaded: owsFeed ? Number(owsFeed.week) : null,
       underdogPlayersLoaded: udByName ? udByName.size : 0,
+      waiverIdpPlayers: waiverIdpPlayers.slice(0, 80),
       league: {
         leagueId: league.league_id,
         name: league.name,
@@ -2939,7 +3087,7 @@
    * with zero hindsight leakage for pregame projections/odds, while attaching
    * `realizedActualPts` to every player for ex-post backtest evaluation.
    */
-  async function getPregameHistoricalWeekState(leagueId = DEFAULT_LEAGUE_ID, week = 1, marketWeight = 0.75) {
+  async function getPregameHistoricalWeekState(leagueId = DEFAULT_LEAGUE_ID, week = 1, marketWeight = 1.0) {
     const startMs = Date.now();
     const longTtl = 3600000; // 1 hour cache for completed historical weeks
 
@@ -3101,12 +3249,40 @@
       };
     });
 
+    const histRosteredIds = new Set();
+    for (const m of matchups) {
+      for (const pid of (m.players || [])) histRosteredIds.add(String(pid));
+      for (const pid of (m.starters || [])) if (pid && String(pid) !== '0') histRosteredIds.add(String(pid));
+    }
+    const histWaiverIdps = [];
+    for (const [pidStr, rawPEntry] of projMap.entries()) {
+      if (histRosteredIds.has(pidStr)) continue;
+      const pInfo = rawPEntry?.player || {};
+      const cPos = canonicalPos(pInfo.position);
+      const fPos = (pInfo.fantasy_positions || [pInfo.position]).map(canonicalPos);
+      const isIdp = ['DL', 'LB', 'DB'].includes(cPos) || fPos.some((fp) => ['DL', 'LB', 'DB'].includes(fp));
+      if (!isIdp) continue;
+      const prePts = computeCustomPoints(rawPEntry.stats || {}, scoringSettings);
+      if (prePts < 2.2) continue;
+      const team = normalizeTeamCode(rawPEntry?.team || pInfo.team || 'FA');
+      const gs = gameStatesByTeam[team] || null;
+      const pEntry = {
+        ...rawPEntry,
+        player: { ...pInfo, injury_status: prePts > 0.5 ? null : pInfo.injury_status }
+      };
+      const modeled = modelPlayer(pidStr, 0, pEntry, null, gs, scoringSettings, null, marketWeight);
+      modeled.slot = cPos;
+      if (modeled.improvedProj >= 2.2) histWaiverIdps.push(modeled);
+    }
+    histWaiverIdps.sort((a, b) => (b.sportsbookProj ?? b.improvedProj) - (a.sportsbookProj ?? a.improvedProj) || b.improvedProj - a.improvedProj);
+
     const baseData = {
       timestamp: new Date().toISOString(),
       computeTimeMs: Date.now() - startMs,
       autoSubByeOut: false,
       marketWeight,
       isHistoricalPregame: true,
+      waiverIdpPlayers: histWaiverIdps.slice(0, 80),
       league: {
         leagueId: league.league_id,
         name: league.name,
@@ -3136,7 +3312,7 @@
    */
   async function runHistoricalBacktest(leagueId = DEFAULT_LEAGUE_ID, targetRosterId = 3, options = {}) {
     const startMs = Date.now();
-    const marketWeight = options.marketWeight !== undefined ? Number(options.marketWeight) : 0.75;
+    const marketWeight = options.marketWeight !== undefined ? Number(options.marketWeight) : 1.0;
     const objective = options.objective || 'total_wins';
 
     const nflState = await fetchJson('https://api.sleeper.app/v1/state/nfl', {}, 60000);
@@ -3459,15 +3635,944 @@
     };
   }
 
+  /**
+   * WAIVER WIRE IDP & DEFENSE UPGRADE ANALYZER
+   * Compares all available Waiver Wire IDP players (DL, LB, DB) against the target team's
+   * current IDP starters & bench using Underdog Fantasy IDP Props, Vegas Game Pace / Pass-Rush
+   * Implied Totals, and Custom League IDP Scoring, and solves for the optimal 1-pickup and 2-pickup
+   * 4-slot IDP unit (DL + LB + DB + IDP_FLEX).
+   */
+  function analyzeWaiverIdpUpgrades(stateData, targetRosterId = 3, optimizerResult = null) {
+    if (!stateData || !stateData.rostersData) return null;
+    const roster = stateData.rostersData.find((r) => r.rosterId === Number(targetRosterId)) || stateData.rostersData[0];
+    const waiverPool = stateData.waiverIdpPlayers || [];
+    const idpSlots = ['DL', 'LB', 'DB', 'IDP_FLEX'];
+
+    // Extract current 4 IDP starter slots from rawStarters
+    const currentIdpSlotPlayers = {};
+    for (const st of (roster.rawStarters || [])) {
+      if (idpSlots.includes(st.slot)) {
+        currentIdpSlotPlayers[st.slot] = st;
+      }
+    }
+    for (const s of idpSlots) {
+      if (!currentIdpSlotPlayers[s]) {
+        currentIdpSlotPlayers[s] = {
+          playerId: '0',
+          fullName: 'Empty Slot',
+          shortName: 'Empty',
+          position: s,
+          canonicalPos: s === 'IDP_FLEX' ? 'LB' : s,
+          fantasyPositions: [s],
+          team: 'FA',
+          opponent: '',
+          slot: s,
+          sportsbookProj: 0,
+          underdogProj: null,
+          vegasMarketProj: 0,
+          improvedProj: 0,
+          sleeperProj: 0,
+          floor: 0,
+          ceiling: 0
+        };
+      }
+    }
+
+    const rosterIdps = [...(roster.rawStarters || []), ...(roster.rawBench || [])].filter(
+      (p) => p && p.playerId !== '0' && (['DL', 'LB', 'DB'].includes(p.canonicalPos) || isEligibleForSlot(p, 'IDP_FLEX'))
+    );
+
+    const getMktPts = (p) => Number(p?.sportsbookProj ?? p?.vegasMarketProj ?? p?.improvedProj ?? 0);
+    const getBlendPts = (p) => Number(p?.improvedProj ?? 0);
+    const getSlpPts = (p) => Number(p?.sleeperProj ?? 0);
+
+    // Solve optimal assignment of up to 4 IDP players across ['DL', 'LB', 'DB', 'IDP_FLEX']
+    const solveBest4IdpUnit = (candidatePlayers) => {
+      let bestScore = -1;
+      let bestAssign = null;
+      const n = candidatePlayers.length;
+
+      // Include a dummy Empty player so fewer than 4 players still works cleanly
+      const pool = [
+        ...candidatePlayers,
+        ...[1, 2, 3, 4].map((idx) => ({
+          playerId: `empty_${idx}`,
+          fullName: 'Empty Slot',
+          shortName: 'Empty',
+          position: 'IDP',
+          canonicalPos: 'LB',
+          fantasyPositions: ['DL', 'LB', 'DB'],
+          team: 'FA',
+          sportsbookProj: 0,
+          improvedProj: 0,
+          sleeperProj: 0,
+          isEmpty: true
+        }))
+      ];
+
+      for (let i0 = 0; i0 < pool.length; i0++) {
+        const p0 = pool[i0];
+        if (!p0.isEmpty && !isEligibleForSlot(p0, 'DL')) continue;
+        for (let i1 = 0; i1 < pool.length; i1++) {
+          if (i1 === i0) continue;
+          const p1 = pool[i1];
+          if (!p1.isEmpty && !isEligibleForSlot(p1, 'LB')) continue;
+          for (let i2 = 0; i2 < pool.length; i2++) {
+            if (i2 === i0 || i2 === i1) continue;
+            const p2 = pool[i2];
+            if (!p2.isEmpty && !isEligibleForSlot(p2, 'DB')) continue;
+            for (let i3 = 0; i3 < pool.length; i3++) {
+              if (i3 === i0 || i3 === i1 || i3 === i2) continue;
+              const p3 = pool[i3];
+              if (!p3.isEmpty && !isEligibleForSlot(p3, 'IDP_FLEX')) continue;
+              const score = getBlendPts(p0) + getBlendPts(p1) + getBlendPts(p2) + getBlendPts(p3) + 0.01 * (getMktPts(p0) + getMktPts(p1) + getMktPts(p2) + getMktPts(p3));
+              if (score > bestScore) {
+                bestScore = score;
+                bestAssign = [
+                  { ...p0, assignedSlot: 'DL' },
+                  { ...p1, assignedSlot: 'LB' },
+                  { ...p2, assignedSlot: 'DB' },
+                  { ...p3, assignedSlot: 'IDP_FLEX' }
+                ];
+              }
+            }
+          }
+        }
+      }
+
+      const unit = bestAssign || [];
+      return {
+        unit,
+        pureVegasTotal: Number(unit.reduce((s, p) => s + getMktPts(p), 0).toFixed(2)),
+        blendedTotal: Number(unit.reduce((s, p) => s + getBlendPts(p), 0).toFixed(2)),
+        sleeperTotal: Number(unit.reduce((s, p) => s + getSlpPts(p), 0).toFixed(2))
+      };
+    };
+
+    const baselineUnit = solveBest4IdpUnit(rosterIdps);
+
+    // Evaluate every single waiver IDP player as a 1-player addition
+    const topCandidates = waiverPool.slice(0, 35);
+    const singlePickupOptions = topCandidates
+      .map((wp) => {
+        const solved = solveBest4IdpUnit([...rosterIdps, wp]);
+        const dVegas = Number((solved.pureVegasTotal - baselineUnit.pureVegasTotal).toFixed(2));
+        const dBlend = Number((solved.blendedTotal - baselineUnit.blendedTotal).toFixed(2));
+        const dSlp = Number((solved.sleeperTotal - baselineUnit.sleeperTotal).toFixed(2));
+        const assignedEntry = solved.unit.find((u) => u.playerId === wp.playerId);
+        // Find who was displaced from baselineUnit
+        const displaced = baselineUnit.unit.find((b) => !solved.unit.some((u) => u.playerId === b.playerId)) || currentIdpSlotPlayers.IDP_FLEX;
+        return {
+          waiverPlayer: wp,
+          assignedSlot: assignedEntry ? assignedEntry.assignedSlot : wp.canonicalPos,
+          displacedPlayer: displaced,
+          solvedUnit: solved,
+          dVegas,
+          dBlend,
+          dSlp
+        };
+      })
+      .filter((x) => x.dBlend > 0 || x.dVegas > 0)
+      .sort((a, b) => b.dBlend - a.dBlend || b.dVegas - a.dVegas);
+
+    // Evaluate best 2-player waiver additions (e.g., filling empty IDP_FLEX + upgrading lowest starter)
+    const top12 = waiverPool.slice(0, 12);
+    let bestTwoPickup = null;
+    for (let i = 0; i < top12.length; i++) {
+      for (let j = i + 1; j < top12.length; j++) {
+        const solved = solveBest4IdpUnit([...rosterIdps, top12[i], top12[j]]);
+        const dBlend = Number((solved.blendedTotal - baselineUnit.blendedTotal).toFixed(2));
+        const dVegas = Number((solved.pureVegasTotal - baselineUnit.pureVegasTotal).toFixed(2));
+        if (!bestTwoPickup || dBlend > bestTwoPickup.dBlend || (dBlend === bestTwoPickup.dBlend && dVegas > bestTwoPickup.dVegas)) {
+          bestTwoPickup = {
+            players: [top12[i], top12[j]],
+            solvedUnit: solved,
+            dBlend,
+            dVegas
+          };
+        }
+      }
+    }
+
+    // Slot-by-slot direct comparison against each of the 4 current IDP starters
+    const slotComparisons = idpSlots.map((slot) => {
+      const currP = currentIdpSlotPlayers[slot];
+      const currMkt = getMktPts(currP);
+      const currBlend = getBlendPts(currP);
+      const currSlp = getSlpPts(currP);
+
+      const betterOnWaivers = waiverPool
+        .filter((wp) => isEligibleForSlot(wp, slot) && (getMktPts(wp) > currMkt || getBlendPts(wp) > currBlend))
+        .map((wp) => ({
+          ...wp,
+          edgeMkt: Number((getMktPts(wp) - currMkt).toFixed(2)),
+          edgeBlend: Number((getBlendPts(wp) - currBlend).toFixed(2)),
+          edgeSlp: Number((getSlpPts(wp) - currSlp).toFixed(2))
+        }))
+        .sort((a, b) => b.edgeBlend - a.edgeBlend || b.edgeMkt - a.edgeMkt);
+
+      return {
+        slot,
+        currentStarter: currP,
+        currMkt,
+        currBlend,
+        currSlp,
+        upgradeCount: betterOnWaivers.length,
+        topUpgrades: betterOnWaivers.slice(0, 6)
+      };
+    });
+
+    // Annotate full waiver pool with comparison against user's lowest starter in their position AND IDP_FLEX
+    const annotatedWaiverPool = waiverPool.map((wp) => {
+      const posStarter = currentIdpSlotPlayers[wp.canonicalPos] || currentIdpSlotPlayers.IDP_FLEX;
+      const flexStarter = currentIdpSlotPlayers.IDP_FLEX;
+      // Also check if wp beats the weakest current active IDP starter on the roster
+      const activeIdpStarters = idpSlots.map((s) => currentIdpSlotPlayers[s]).filter((p) => p && p.playerId !== '0');
+      const weakestActiveStarter = activeIdpStarters.length
+        ? [...activeIdpStarters].sort((a, b) => getBlendPts(a) - getBlendPts(b))[0]
+        : posStarter;
+
+      const edgeVsPosStarterMkt = Number((getMktPts(wp) - getMktPts(posStarter)).toFixed(2));
+      const edgeVsPosStarterBlend = Number((getBlendPts(wp) - getBlendPts(posStarter)).toFixed(2));
+      const edgeVsWeakestStarterMkt = Number((getMktPts(wp) - getMktPts(weakestActiveStarter)).toFixed(2));
+      const edgeVsWeakestStarterBlend = Number((getBlendPts(wp) - getBlendPts(weakestActiveStarter)).toFixed(2));
+      const edgeVsFlexStarterBlend = Number((getBlendPts(wp) - getBlendPts(flexStarter)).toFixed(2));
+
+      return {
+        ...wp,
+        posStarterName: posStarter.shortName || posStarter.fullName,
+        posStarterMkt: getMktPts(posStarter),
+        posStarterBlend: getBlendPts(posStarter),
+        weakestStarterName: weakestActiveStarter.shortName || weakestActiveStarter.fullName,
+        weakestStarterSlot: weakestActiveStarter.slot,
+        edgeVsPosStarterMkt,
+        edgeVsPosStarterBlend,
+        edgeVsWeakestStarterMkt,
+        edgeVsWeakestStarterBlend,
+        edgeVsFlexStarterBlend,
+        beatsPosStarter: edgeVsPosStarterMkt > 0 || edgeVsPosStarterBlend > 0,
+        beatsAnyActiveStarter: edgeVsWeakestStarterMkt > 0 || edgeVsWeakestStarterBlend > 0,
+        fillsEmptyFlex: flexStarter.playerId === '0'
+      };
+    });
+
+    return {
+      rosterId: roster.rosterId,
+      teamName: roster.teamName,
+      currentIdpSlotPlayers,
+      rosterIdps,
+      baselineUnit,
+      bestSinglePickup: singlePickupOptions[0] || null,
+      singlePickupOptions: singlePickupOptions.slice(0, 10),
+      bestTwoPickup,
+      slotComparisons,
+      annotatedWaiverPool
+    };
+  }
+
+  /**
+   * Solve the globally optimal 14-slot starting lineup for a team in a future week `w`,
+   * automatically replacing players on NFL Bye weeks with the highest-projected eligible bench players.
+   * Uses the exact matroid slot ordering:
+   *   1) Mandatory single-position slots: QB, RB, RB, WR, WR, WR, TE, DL, LB, DB
+   *   2) Restrictive flex slots: FLEX, FLEX, IDP_FLEX
+   *   3) Broadest flex slot: SUPER_FLEX
+   */
+  function solveOptimalFutureWeekLineup(rosterCandidates, starterSlots) {
+    const usedIds = new Set();
+    const assignedBySlotIdx = new Array(starterSlots.length).fill(null);
+
+    const slotPriority = (slot) => {
+      if (['QB', 'RB', 'WR', 'TE', 'DL', 'LB', 'DB'].includes(slot)) return 1;
+      if (slot === 'FLEX' || slot === 'IDP_FLEX') return 2;
+      if (slot === 'SUPER_FLEX') return 3;
+      return 4;
+    };
+
+    const orderedSlotIndices = starterSlots
+      .map((slot, idx) => ({ slot, idx, prio: slotPriority(slot) }))
+      .sort((a, b) => a.prio - b.prio || a.idx - b.idx);
+
+    const activePool = rosterCandidates
+      .filter((p) => p && !p.isOnBye && p.projPts > 0.1)
+      .sort((a, b) => b.projPts - a.projPts);
+
+    for (const { slot, idx } of orderedSlotIndices) {
+      let bestP = null;
+      for (const p of activePool) {
+        if (usedIds.has(p.playerId)) continue;
+        if (isEligibleForSlot(p, slot)) {
+          bestP = p;
+          break;
+        }
+      }
+      if (bestP) {
+        usedIds.add(bestP.playerId);
+        assignedBySlotIdx[idx] = { ...bestP, assignedSlot: slot };
+      } else {
+        assignedBySlotIdx[idx] = {
+          playerId: '0',
+          fullName: 'Empty / Bye Gap',
+          shortName: 'Empty',
+          position: slot,
+          canonicalPos: slot === 'SUPER_FLEX' ? 'QB' : (slot === 'FLEX' ? 'WR' : (slot === 'IDP_FLEX' ? 'LB' : slot)),
+          team: 'FA',
+          opponent: '',
+          projPts: 0,
+          sleeperPts: 0,
+          sdPts: 2.0,
+          assignedSlot: slot,
+          isEmpty: true
+        };
+      }
+    }
+
+    let totalProj = 0;
+    let totalSleeperProj = 0;
+    let totalVar = 0;
+    const byTeamOffense = new Map();
+
+    for (const st of assignedBySlotIdx) {
+      if (!st || st.isEmpty) continue;
+      totalProj += st.projPts;
+      totalSleeperProj += st.sleeperPts;
+      totalVar += st.sdPts * st.sdPts;
+      if (st.team && st.team !== 'FA' && !['DL', 'LB', 'DB'].includes(st.canonicalPos)) {
+        if (!byTeamOffense.has(st.team)) byTeamOffense.set(st.team, []);
+        byTeamOffense.get(st.team).push(st);
+      }
+    }
+
+    // Account for same-team offensive stack covariance in future weeks
+    for (const [, tPlayers] of byTeamOffense.entries()) {
+      if (tPlayers.length < 2) continue;
+      const hasQb = tPlayers.some((p) => p.canonicalPos === 'QB');
+      const sumSd = tPlayers.reduce((s, p) => s + p.sdPts, 0);
+      const scale = hasQb ? 0.18 * (tPlayers.length - 1) : 0.11 * (tPlayers.length - 1);
+      totalVar += Math.pow(sumSd * scale, 2);
+    }
+
+    const totalSd = Math.sqrt(Math.max(100.0, totalVar));
+    const onByePlayers = rosterCandidates
+      .filter((p) => p && p.isOnBye && p.baselineValue >= 5.5)
+      .sort((a, b) => b.baselineValue - a.baselineValue);
+
+    const topStarters = [...assignedBySlotIdx]
+      .filter((p) => p && !p.isEmpty)
+      .sort((a, b) => b.projPts - a.projPts)
+      .slice(0, 4);
+
+    return {
+      starters: assignedBySlotIdx,
+      totalProj: Number(totalProj.toFixed(2)),
+      totalSleeperProj: Number(totalSleeperProj.toFixed(2)),
+      totalSd: Number(totalSd.toFixed(2)),
+      onByePlayers,
+      topStarters
+    };
+  }
+
+  /**
+   * REST OF SEASON (ROS) STANDINGS, SCHEDULE & PLAYOFF MONTE CARLO SIMULATOR
+   *
+   * Combines:
+   *  1) Official Completed Standings & Points For (Weeks 1..last_scored_leg, e.g. Weeks 1-7)
+   *  2) Current In-Progress / Live Week 8 State & Remaining Player Distributions
+   *  3) Remaining Regular Season Schedule & Weekly Player Projections (Weeks 9..13)
+   *     with Optimal 14-Starter Bye-Week Lineup Assignment & Vegas Market Talent Adjustments
+   *  4) 4-Team Playoff Bracket Simulation across Weeks 14-17 (2-week Semifinals W14-15 + 2-week Finals W16-17)
+   */
+  async function runRestOfSeasonSimulation(leagueId = DEFAULT_LEAGUE_ID, currentState = null, options = {}) {
+    const startMs = Date.now();
+    const numSims = options.numSims || 6000;
+    const marketWeight = options.marketWeight !== undefined
+      ? Number(options.marketWeight)
+      : (currentState?.marketWeight !== undefined ? Number(currentState.marketWeight) : 1.0);
+    const useOptimalCurrentWeek = options.useOptimalCurrentWeek !== undefined ? Boolean(options.useOptimalCurrentWeek) : false;
+
+    const longTtl = 1800000; // 30 min cache for future weekly projections & schedules
+    const nflState = await fetchJson('https://api.sleeper.app/v1/state/nfl', {}, 60000);
+    const currentNflWeek = Number(nflState.display_week || nflState.week || 8);
+
+    // Ensure we have the live currentNflWeek state (even if user is inspecting an earlier week in the UI)
+    let liveState = currentState;
+    if (!liveState || Number(liveState.league?.week) !== currentNflWeek) {
+      liveState = await getLeagueLiveState(leagueId, currentNflWeek, false, true, marketWeight, currentState?.marketSource || 'consensus');
+    }
+
+    const leagueInfo = await fetchJson(`https://api.sleeper.app/v1/league/${leagueId}`, {}, longTtl);
+    const season = leagueInfo.season || liveState.league?.season || '2026';
+    const scoringSettings = leagueInfo.scoring_settings || {};
+    const starterSlots = (leagueInfo.roster_positions || []).filter((p) => p !== 'BN');
+    const playoffWeekStart = Number(leagueInfo.settings?.playoff_week_start || 14);
+    const regularSeasonEndWeek = playoffWeekStart - 1; // Week 13
+    const playoffTeamsCount = Number(leagueInfo.settings?.playoff_teams || 4);
+    const lastScoredWeek = Number(leagueInfo.settings?.last_scored_leg || (currentNflWeek - 1));
+
+    // Future regular season weeks (e.g. 9..13) and playoff weeks (14..17)
+    const futureRegWeeks = [];
+    for (let w = currentNflWeek + 1; w <= regularSeasonEndWeek; w++) futureRegWeeks.push(w);
+    const playoffWeeks = [14, 15, 16, 17].filter((w) => w >= playoffWeekStart);
+    const allFutureWeeks = [...futureRegWeeks, ...playoffWeeks];
+
+    const canonicalPosQuery = 'position[]=DB&position[]=DL&position[]=LB&position[]=QB&position[]=RB&position[]=TE&position[]=WR&season_type=regular';
+
+    const [futureMatchupsArr, futureProjsArr] = await Promise.all([
+      Promise.all(
+        futureRegWeeks.map((w) =>
+          fetchJson(`https://api.sleeper.app/v1/league/${leagueId}/matchups/${w}`, {}, longTtl).catch(() => [])
+        )
+      ),
+      Promise.all(
+        allFutureWeeks.map((w) =>
+          fetchJson(`https://api.sleeper.com/projections/nfl/${season}/${w}?${canonicalPosQuery}`, {}, longTtl).catch(() => [])
+        )
+      )
+    ]);
+
+    const matchupsByWeek = new Map();
+    futureRegWeeks.forEach((w, idx) => {
+      matchupsByWeek.set(w, futureMatchupsArr[idx] || []);
+    });
+
+    const projsByWeek = new Map();
+    allFutureWeeks.forEach((w, idx) => {
+      const map = new Map();
+      for (const entry of (futureProjsArr[idx] || [])) {
+        if (entry && entry.player_id) {
+          map.set(String(entry.player_id), entry);
+        }
+      }
+      projsByWeek.set(w, map);
+    });
+
+    // Extract player metadata and Vegas/Underdog market talent multiplier from liveState
+    const playerMetaById = new Map();
+    const rostersData = liveState.rostersData || [];
+    const numTeams = rostersData.length;
+
+    for (const r of rostersData) {
+      const allPlayers = [...(r.rawStarters || r.starters || []), ...(r.rawBench || r.bench || [])];
+      for (const p of allPlayers) {
+        if (!p || !p.playerId || p.playerId === '0') continue;
+        const slpPre = Number(p.sleeperPregameProj || 0);
+        const mktPre = Number(p.sportsbookProj ?? p.pregameProj ?? slpPre);
+        let talentMult = 1.0;
+        if (slpPre >= 3.5 && mktPre > 0) {
+          const rawRatio = mktPre / slpPre;
+          // Persist 45% of the current Vegas/Underdog prop over/under-valuation into ROS weekly projections
+          talentMult = Math.max(0.84, Math.min(1.20, 1.0 + 0.45 * (rawRatio - 1.0)));
+        }
+        playerMetaById.set(String(p.playerId), {
+          playerId: String(p.playerId),
+          fullName: p.fullName,
+          shortName: p.shortName,
+          position: p.position,
+          canonicalPos: p.canonicalPos,
+          fantasyPositions: p.fantasyPositions,
+          team: p.team,
+          talentMult,
+          baselineValue: Math.max(mktPre, slpPre, Number(p.improvedProj || 0))
+        });
+      }
+    }
+
+    const posCvMap = {
+      QB: { cv: 0.38, baseSd: 2.2 },
+      RB: { cv: 0.50, baseSd: 2.0 },
+      WR: { cv: 0.58, baseSd: 2.1 },
+      TE: { cv: 0.62, baseSd: 1.8 },
+      DL: { cv: 0.70, baseSd: 1.5 },
+      LB: { cv: 0.50, baseSd: 1.4 },
+      DB: { cv: 0.62, baseSd: 1.4 }
+    };
+
+    // Build optimal weekly projections for every team across all future weeks (Weeks 9..17)
+    // teamWeeklyModels.get(w) -> Map<rosterId, { totalProj, totalSleeperProj, totalSd, starters, onByePlayers, topStarters }>
+    const teamWeeklyModels = new Map();
+
+    for (const w of allFutureWeeks) {
+      const wProjMap = projsByWeek.get(w) || new Map();
+      const weekTeamMap = new Map();
+
+      for (const r of rostersData) {
+        const rosterPlayerIds = Array.from(
+          new Set(
+            [...(r.rawStarters || r.starters || []), ...(r.rawBench || r.bench || [])]
+              .map((p) => String(p?.playerId || '0'))
+              .filter((id) => id !== '0')
+          )
+        );
+
+        const candidates = rosterPlayerIds.map((pid) => {
+          const meta = playerMetaById.get(pid) || {};
+          const pEntry = wProjMap.get(pid);
+          const pInfo = pEntry?.player || {};
+          const cPos = meta.canonicalPos || canonicalPos(pInfo.position || 'WR');
+          const fPos = meta.fantasyPositions || (pInfo.fantasy_positions || [cPos]);
+          const team = normalizeTeamCode(pEntry?.team || meta.team || pInfo.team || 'FA');
+          const opponent = normalizeTeamCode(pEntry?.opponent || '');
+          const isOnBye = !pEntry || !opponent || opponent === 'FA';
+
+          const rawSlpPts = isOnBye ? 0 : computeCustomPoints(pEntry.stats || {}, scoringSettings);
+          const tMult = meta.talentMult || 1.0;
+          const blendedMult = 1.0 + marketWeight * (tMult - 1.0);
+          const projPts = isOnBye ? 0 : Number((rawSlpPts * blendedMult).toFixed(2));
+          const vol = posCvMap[cPos] || { cv: 0.55, baseSd: 1.8 };
+          const sdPts = projPts > 0.2 ? Math.sqrt(Math.pow(vol.cv * projPts, 2) + Math.pow(vol.baseSd, 2)) : 0;
+
+          return {
+            playerId: pid,
+            fullName: meta.fullName || `${pInfo.first_name || ''} ${pInfo.last_name || ''}`.trim() || `#${pid}`,
+            shortName: meta.shortName || `${(pInfo.first_name || 'P').charAt(0)}. ${pInfo.last_name || pid}`,
+            position: meta.position || pInfo.position || cPos,
+            canonicalPos: cPos,
+            fantasyPositions: fPos,
+            team,
+            opponent,
+            isOnBye,
+            projPts,
+            sleeperPts: Number(rawSlpPts.toFixed(2)),
+            sdPts,
+            baselineValue: meta.baselineValue || rawSlpPts
+          };
+        });
+
+        const solved = solveOptimalFutureWeekLineup(candidates, starterSlots);
+        weekTeamMap.set(r.rosterId, solved);
+      }
+
+      teamWeeklyModels.set(w, weekTeamMap);
+    }
+
+    // Build opponent lookup per week (Week 8 live + Weeks 9..13 future)
+    const rosterIdxById = new Map();
+    rostersData.forEach((r, idx) => rosterIdxById.set(r.rosterId, idx));
+
+    const buildWeekOppIndex = (matchupsList) => {
+      const oppIdx = new Int32Array(numTeams).fill(-1);
+      const byMid = new Map();
+      for (const m of matchupsList) {
+        const rIdx = rosterIdxById.get(m.roster_id ?? m.rosterId);
+        const mid = m.matchup_id ?? m.matchupId;
+        if (rIdx === undefined || !mid) continue;
+        if (!byMid.has(mid)) byMid.set(mid, []);
+        byMid.get(mid).push(rIdx);
+      }
+      for (const pair of byMid.values()) {
+        if (pair.length === 2) {
+          oppIdx[pair[0]] = pair[1];
+          oppIdx[pair[1]] = pair[0];
+        }
+      }
+      return oppIdx;
+    };
+
+    const weekOppIndices = new Map();
+    weekOppIndices.set(currentNflWeek, buildWeekOppIndex(rostersData));
+    for (const w of futureRegWeeks) {
+      weekOppIndices.set(w, buildWeekOppIndex(matchupsByWeek.get(w) || []));
+    }
+
+    // Prepare Week 8 (currentNflWeek) parameters per team
+    const w8Mean = new Float64Array(numTeams);
+    const w8Sd = new Float64Array(numTeams);
+    const w8CurrentPts = new Float64Array(numTeams);
+    const w8SleeperProj = new Float64Array(numTeams);
+
+    for (let i = 0; i < numTeams; i++) {
+      const r = rostersData[i];
+      w8CurrentPts[i] = Number(r.currentPts || 0);
+      w8Mean[i] = Number(r.simulation?.simMean ?? r.improvedTotalProj ?? r.currentPts ?? 140);
+      w8Sd[i] = Number(r.simulation?.simSd ?? 16.5);
+      w8SleeperProj[i] = Number(r.sleeperTotalProj ?? w8Mean[i]);
+    }
+
+    // Prepare Future Weeks (9..17) mean & SD arrays indexed by [week][teamIdx]
+    const futureMeanByWeek = new Map();
+    const futureSdByWeek = new Map();
+    for (const w of allFutureWeeks) {
+      const mArr = new Float64Array(numTeams);
+      const sArr = new Float64Array(numTeams);
+      const wMap = teamWeeklyModels.get(w);
+      for (let i = 0; i < numTeams; i++) {
+        const mod = wMap.get(rostersData[i].rosterId);
+        mArr[i] = mod ? mod.totalProj : 145.0;
+        sArr[i] = mod ? mod.totalSd : 22.0;
+      }
+      futureMeanByWeek.set(w, mArr);
+      futureSdByWeek.set(w, sArr);
+    }
+
+    // Track per-week matchup and median win counts across all simulations
+    const allRegSimWeeks = [currentNflWeek, ...futureRegWeeks];
+    const weeklyStatsAccum = new Map();
+    for (const w of allRegSimWeeks) {
+      weeklyStatsAccum.set(w, {
+        h2hWins: new Float64Array(numTeams),
+        medWins: new Float64Array(numTeams),
+        win2_0: new Float64Array(numTeams),
+        win1_1: new Float64Array(numTeams),
+        win0_2: new Float64Array(numTeams),
+        medianCutoffSum: 0
+      });
+    }
+
+    // Track season-level accumulators across numSims
+    const baseWins = rostersData.map((r) => Number(r.wins || 0));
+    const baseLosses = rostersData.map((r) => Number(r.losses || 0));
+    const baseFpts = rostersData.map((r) => Number(r.fptsSeason || 0));
+    const totalRegSeasonGames = regularSeasonEndWeek * 2; // 13 weeks * 2 = 26 games
+
+    const totalWinsSum = new Float64Array(numTeams);
+    const totalPtsSum = new Float64Array(numTeams);
+    const ros9to13WinsSum = new Float64Array(numTeams);
+    const winDistCounts = Array.from({ length: numTeams }, () => new Int32Array(totalRegSeasonGames + 1));
+    const teamWinSamples = Array.from({ length: numTeams }, () => new Float32Array(numSims));
+    const teamPtsSamples = Array.from({ length: numTeams }, () => new Float32Array(numSims));
+
+    const seedCounts = Array.from({ length: numTeams }, () => new Int32Array(numTeams));
+    const playoffCounts = new Int32Array(numTeams);
+    const top2SeedCounts = new Int32Array(numTeams);
+    const firstSeedCounts = new Int32Array(numTeams);
+    const finalsCounts = new Int32Array(numTeams);
+    const champCounts = new Int32Array(numTeams);
+
+    const rng = new FastRNG(20261102);
+    const simWins = new Float64Array(numTeams);
+    const simFpts = new Float64Array(numTeams);
+    const weekScores = new Float64Array(numTeams);
+    const sortedScores = new Float64Array(numTeams);
+    const rankIndices = Array.from({ length: numTeams }, (_, i) => i);
+
+    for (let s = 0; s < numSims; s++) {
+      for (let i = 0; i < numTeams; i++) {
+        simWins[i] = baseWins[i];
+        simFpts[i] = baseFpts[i];
+      }
+
+      // Simulate Week 8 (live) + Weeks 9..13 (future regular season)
+      for (let wIdx = 0; wIdx < allRegSimWeeks.length; wIdx++) {
+        const w = allRegSimWeeks[wIdx];
+        const isLive = w === currentNflWeek;
+        const mArr = isLive ? w8Mean : futureMeanByWeek.get(w);
+        const sArr = isLive ? w8Sd : futureSdByWeek.get(w);
+        const oppIdx = weekOppIndices.get(w);
+        const wAcc = weeklyStatsAccum.get(w);
+
+        // Shared weekly NFL scoring environment shock (subtle league-wide high/low scoring week correlation)
+        const leagueEnvZ = rng.nextGaussian() * 0.18;
+
+        for (let i = 0; i < numTeams; i++) {
+          const z = 0.983 * rng.nextGaussian() + leagueEnvZ;
+          let sc;
+          if (isLive) {
+            const remMean = Math.max(0, mArr[i] - w8CurrentPts[i]);
+            sc = w8CurrentPts[i] + sampleSkewedRemaining(z, remMean, sArr[i], 0.45);
+          } else {
+            sc = sampleSkewedRemaining(z, mArr[i], sArr[i], 0.35);
+          }
+          weekScores[i] = sc;
+          sortedScores[i] = sc;
+          simFpts[i] += sc;
+        }
+
+        sortedScores.sort();
+        const midR = Math.floor(numTeams / 2);
+        const midL = Math.max(0, midR - 1);
+        const medCutoff = 0.5 * (sortedScores[midL] + sortedScores[midR]);
+        wAcc.medianCutoffSum += medCutoff;
+
+        for (let i = 0; i < numTeams; i++) {
+          const opp = oppIdx[i];
+          let wonH2H = 0;
+          if (opp >= 0) {
+            if (weekScores[i] > weekScores[opp]) wonH2H = 1;
+            else if (weekScores[i] === weekScores[opp]) wonH2H = 0.5;
+          }
+          let wonMed = 0;
+          if (weekScores[i] > medCutoff) wonMed = 1;
+          else if (weekScores[i] === medCutoff) wonMed = 0.5;
+
+          const wWins = wonH2H + wonMed;
+          simWins[i] += wWins;
+          if (!isLive) {
+            ros9to13WinsSum[i] += wWins;
+          }
+
+          wAcc.h2hWins[i] += wonH2H;
+          wAcc.medWins[i] += wonMed;
+          if (wonH2H === 1 && wonMed === 1) wAcc.win2_0[i] += 1;
+          else if (wonH2H === 0 && wonMed === 0) wAcc.win0_2[i] += 1;
+          else wAcc.win1_1[i] += 1;
+        }
+      }
+
+      // Record regular-season totals & rank teams 1..10 (Tiebreaker: Total Season Fantasy Points)
+      for (let i = 0; i < numTeams; i++) {
+        totalWinsSum[i] += simWins[i];
+        totalPtsSum[i] += simFpts[i];
+        teamWinSamples[i][s] = simWins[i];
+        teamPtsSamples[i][s] = simFpts[i];
+        const wBucket = Math.max(0, Math.min(totalRegSeasonGames, Math.round(simWins[i])));
+        winDistCounts[i][wBucket]++;
+      }
+
+      rankIndices.sort((a, b) => (simWins[b] - simWins[a]) || (simFpts[b] - simFpts[a]));
+
+      for (let rank = 0; rank < numTeams; rank++) {
+        const tIdx = rankIndices[rank];
+        seedCounts[tIdx][rank]++;
+        if (rank < playoffTeamsCount) playoffCounts[tIdx]++;
+        if (rank < 2) top2SeedCounts[tIdx]++;
+        if (rank === 0) firstSeedCounts[tIdx]++;
+      }
+
+      // Simulate 4-Team Playoff Bracket (2-Week Semifinals in Weeks 14-15, 2-Week Championship in Weeks 16-17)
+      const seed1 = rankIndices[0];
+      const seed2 = rankIndices[1];
+      const seed3 = rankIndices[2];
+      const seed4 = rankIndices[3];
+
+      const samplePlayoff2WeekScore = (tIdx, wA, wB) => {
+        const mA = futureMeanByWeek.get(wA)?.[tIdx] || 148.0;
+        const sA = futureSdByWeek.get(wA)?.[tIdx] || 22.0;
+        const mB = futureMeanByWeek.get(wB)?.[tIdx] || 148.0;
+        const sB = futureSdByWeek.get(wB)?.[tIdx] || 22.0;
+        const scA = sampleSkewedRemaining(rng.nextGaussian(), mA, sA, 0.35);
+        const scB = sampleSkewedRemaining(rng.nextGaussian(), mB, sB, 0.35);
+        return scA + scB;
+      };
+
+      const sf1Score1 = samplePlayoff2WeekScore(seed1, 14, 15);
+      const sf1Score4 = samplePlayoff2WeekScore(seed4, 14, 15);
+      const finalist1 = sf1Score1 >= sf1Score4 ? seed1 : seed4;
+
+      const sf2Score2 = samplePlayoff2WeekScore(seed2, 14, 15);
+      const sf2Score3 = samplePlayoff2WeekScore(seed3, 14, 15);
+      const finalist2 = sf2Score2 >= sf2Score3 ? seed2 : seed3;
+
+      finalsCounts[finalist1]++;
+      finalsCounts[finalist2]++;
+
+      const finScore1 = samplePlayoff2WeekScore(finalist1, 16, 17);
+      const finScore2 = samplePlayoff2WeekScore(finalist2, 16, 17);
+      const champion = finScore1 >= finScore2 ? finalist1 : finalist2;
+      champCounts[champion]++;
+    }
+
+    // Build detailed week-by-week schedule & forecast for every team (Weeks 8..13)
+    const teamSchedules = {};
+    const teamSosRaw = new Float64Array(numTeams);
+
+    for (let i = 0; i < numTeams; i++) {
+      const r = rostersData[i];
+      const sched = [];
+      let oppFuturePtsSum = 0;
+
+      for (const w of allRegSimWeeks) {
+        const isLive = w === currentNflWeek;
+        const oppIdx = weekOppIndices.get(w)[i];
+        const oppR = oppIdx >= 0 ? rostersData[oppIdx] : null;
+        const wAcc = weeklyStatsAccum.get(w);
+
+        const teamMod = isLive ? null : teamWeeklyModels.get(w)?.get(r.rosterId);
+        const oppMod = (isLive || !oppR) ? null : teamWeeklyModels.get(w)?.get(oppR.rosterId);
+
+        const teamProj = isLive ? Number(w8Mean[i].toFixed(2)) : (teamMod ? teamMod.totalProj : 145.0);
+        const teamSleeperProj = isLive ? Number(w8SleeperProj[i].toFixed(2)) : (teamMod ? teamMod.totalSleeperProj : 142.0);
+        const teamSd = isLive ? Number(w8Sd[i].toFixed(2)) : (teamMod ? teamMod.totalSd : 22.0);
+        const oppProj = isLive
+          ? (oppIdx >= 0 ? Number(w8Mean[oppIdx].toFixed(2)) : 145.0)
+          : (oppMod ? oppMod.totalProj : 145.0);
+
+        if (!isLive) {
+          oppFuturePtsSum += oppProj;
+        }
+
+        // For live Week 8, use the exact joint simulation probabilities from liveState so they match 100%
+        const h2hWinProb = isLive
+          ? Number((r.simulation?.h2hWinProbImproved ?? (wAcc.h2hWins[i] / numSims)).toFixed(4))
+          : Number((wAcc.h2hWins[i] / numSims).toFixed(4));
+        const medianWinProb = isLive
+          ? Number((r.simulation?.medianWinProbImproved ?? (wAcc.medWins[i] / numSims)).toFixed(4))
+          : Number((wAcc.medWins[i] / numSims).toFixed(4));
+        const prob2_0 = isLive
+          ? Number((r.simulation?.prob2_0 ?? (wAcc.win2_0[i] / numSims)).toFixed(4))
+          : Number((wAcc.win2_0[i] / numSims).toFixed(4));
+        const prob1_1 = isLive
+          ? Number((r.simulation?.prob1_1 ?? (wAcc.win1_1[i] / numSims)).toFixed(4))
+          : Number((wAcc.win1_1[i] / numSims).toFixed(4));
+        const prob0_2 = isLive
+          ? Number((r.simulation?.prob0_2 ?? (wAcc.win0_2[i] / numSims)).toFixed(4))
+          : Number((wAcc.win0_2[i] / numSims).toFixed(4));
+
+        sched.push({
+          week: w,
+          isLiveWeek: isLive,
+          oppRosterId: oppR ? oppR.rosterId : null,
+          oppTeamName: oppR ? oppR.teamName : 'BYE',
+          oppOwnerName: oppR ? oppR.ownerName : '',
+          currentPts: isLive ? Number(w8CurrentPts[i].toFixed(2)) : null,
+          oppCurrentPts: (isLive && oppR) ? Number(oppR.currentPts.toFixed(2)) : null,
+          teamProj,
+          teamSleeperProj,
+          teamSd,
+          oppProj,
+          projDiff: Number((teamProj - oppProj).toFixed(2)),
+          leagueMedianProj: isLive
+            ? Number((liveState.leagueMedian?.expectedMedianImproved || (wAcc.medianCutoffSum / numSims)).toFixed(2))
+            : Number((wAcc.medianCutoffSum / numSims).toFixed(2)),
+          h2hWinProb,
+          medianWinProb,
+          prob2_0,
+          prob1_1,
+          prob0_2,
+          expectedWins: Number((h2hWinProb + medianWinProb).toFixed(3)),
+          onByePlayers: isLive ? [] : (teamMod?.onByePlayers || []).slice(0, 5),
+          topStarters: isLive
+            ? [...(r.starters || [])].sort((a, b) => b.improvedProj - a.improvedProj).slice(0, 4).map((p) => ({
+                shortName: p.shortName,
+                position: p.canonicalPos || p.position,
+                team: p.team,
+                projPts: p.improvedProj
+              }))
+            : (teamMod?.topStarters || []).map((p) => ({
+                shortName: p.shortName,
+                position: p.canonicalPos || p.position,
+                team: p.team,
+                projPts: p.projPts
+              }))
+        });
+      }
+
+      teamSchedules[r.rosterId] = sched;
+      teamSosRaw[i] = futureRegWeeks.length > 0 ? oppFuturePtsSum / futureRegWeeks.length : 145.0;
+    }
+
+    // Rank Strength of Schedule (SOS): #1 = Hardest remaining opponent PPG, #10 = Easiest
+    const sosOrder = Array.from({ length: numTeams }, (_, i) => i).sort((a, b) => teamSosRaw[b] - teamSosRaw[a]);
+    const sosRankByTeamIdx = new Int32Array(numTeams);
+    sosOrder.forEach((tIdx, rnk) => {
+      sosRankByTeamIdx[tIdx] = rnk + 1;
+    });
+
+    // Assemble final standingsProjections for all 10 teams
+    const standingsProjections = rostersData.map((r, i) => {
+      const winSamps = teamWinSamples[i];
+      const ptsSamps = teamPtsSamples[i];
+      winSamps.sort();
+      ptsSamps.sort();
+
+      const expWins = totalWinsSum[i] / numSims;
+      const expLosses = totalRegSeasonGames - expWins;
+      const expSeasonPts = totalPtsSum[i] / numSims;
+      const sched = teamSchedules[r.rosterId] || [];
+      const futureSched = sched.filter((x) => !x.isLiveWeek);
+      const liveWeekEntry = sched.find((x) => x.isLiveWeek) || null;
+
+      const rosFuturePts = futureSched.reduce((acc, x) => acc + x.teamProj, 0);
+      const rosFutureAvgPpg = futureSched.length > 0 ? rosFuturePts / futureSched.length : 0;
+      const rosFutureExpWins = futureSched.reduce((acc, x) => acc + x.expectedWins, 0);
+
+      // Playoff weeks (14-17) average projected PPG
+      const playoffPpg = playoffWeeks.length > 0
+        ? playoffWeeks.reduce((acc, w) => acc + (teamWeeklyModels.get(w)?.get(r.rosterId)?.totalProj || 0), 0) / playoffWeeks.length
+        : rosFutureAvgPpg;
+
+      const winHistogram = [];
+      for (let wCount = 0; wCount <= totalRegSeasonGames; wCount++) {
+        winHistogram.push({
+          wins: wCount,
+          losses: totalRegSeasonGames - wCount,
+          prob: Number((winDistCounts[i][wCount] / numSims).toFixed(4))
+        });
+      }
+
+      return {
+        rosterId: r.rosterId,
+        teamName: r.teamName,
+        ownerName: r.ownerName,
+        avatarUrl: r.avatarUrl,
+        division: r.division,
+        // Official Completed Record (Weeks 1..7)
+        currentWins: baseWins[i],
+        currentLosses: baseLosses[i],
+        currentFpts: baseFpts[i],
+        // Live Week 8 Forecast
+        liveWeek: liveWeekEntry,
+        // Remaining Regular Season (Weeks 9..13)
+        rosWeeksCount: futureSched.length,
+        rosDecisionsCount: futureSched.length * 2,
+        rosAvgPpg: Number(rosFutureAvgPpg.toFixed(2)),
+        rosTotalPts: Number(rosFuturePts.toFixed(2)),
+        rosExpectedWins: Number(rosFutureExpWins.toFixed(2)),
+        playoffAvgPpg: Number(playoffPpg.toFixed(2)),
+        sosAvgOppPpg: Number(teamSosRaw[i].toFixed(2)),
+        sosRank: sosRankByTeamIdx[i],
+        // Projected Final Regular Season Standing (After Week 13 — 26 Total Decisions)
+        expectedWins: Number(expWins.toFixed(2)),
+        expectedLosses: Number(expLosses.toFixed(2)),
+        medianWins: Number(winSamps[Math.floor(numSims * 0.50)].toFixed(1)),
+        p10Wins: Number(winSamps[Math.floor(numSims * 0.10)].toFixed(1)),
+        p90Wins: Number(winSamps[Math.floor(numSims * 0.90)].toFixed(1)),
+        expectedSeasonPts: Number(expSeasonPts.toFixed(2)),
+        p10SeasonPts: Number(ptsSamps[Math.floor(numSims * 0.10)].toFixed(1)),
+        p90SeasonPts: Number(ptsSamps[Math.floor(numSims * 0.90)].toFixed(1)),
+        // Seed & Playoff Probabilities
+        playoffProb: Number((playoffCounts[i] / numSims).toFixed(4)),
+        top2SeedProb: Number((top2SeedCounts[i] / numSims).toFixed(4)),
+        firstSeedProb: Number((firstSeedCounts[i] / numSims).toFixed(4)),
+        finalsProb: Number((finalsCounts[i] / numSims).toFixed(4)),
+        champProb: Number((champCounts[i] / numSims).toFixed(4)),
+        seedProbs: Array.from(seedCounts[i]).map((c) => Number((c / numSims).toFixed(4))),
+        winHistogram
+      };
+    });
+
+    standingsProjections.sort(
+      (a, b) => b.expectedWins - a.expectedWins || b.expectedSeasonPts - a.expectedSeasonPts
+    );
+
+    standingsProjections.forEach((t, idx) => {
+      t.projectedRank = idx + 1;
+    });
+
+    // Estimate the expected Playoff Cutoff Wins (4th seed win total distribution)
+    const fourthSeedTeam = standingsProjections[Math.min(playoffTeamsCount - 1, standingsProjections.length - 1)];
+    const fifthSeedTeam = standingsProjections[Math.min(playoffTeamsCount, standingsProjections.length - 1)];
+    const expectedPlayoffCutoffWins = Number(
+      (0.5 * ((fourthSeedTeam?.expectedWins || 15) + (fifthSeedTeam?.expectedWins || 14))).toFixed(1)
+    );
+
+    return {
+      computeTimeMs: Date.now() - startMs,
+      numSims,
+      season,
+      currentNflWeek,
+      lastScoredWeek,
+      regularSeasonEndWeek,
+      playoffWeekStart,
+      playoffTeamsCount,
+      totalRegSeasonGames,
+      expectedPlayoffCutoffWins,
+      standingsProjections,
+      teamSchedules
+    };
+  }
+
   return {
     DEFAULT_LEAGUE_ID,
+    clearCache,
     getLeagueLiveState,
     getPregameHistoricalWeekState,
     runHistoricalBacktest,
+    runRestOfSeasonSimulation,
     recomputeLeagueFromRosters,
     applyAutoSubForByeOrOut,
     runJointLeagueSimulation,
     runSimulationLineupOptimizer,
+    analyzeWaiverIdpUpgrades,
     computePairwisePlayerCorrelation,
     isEligibleForSlot
   };

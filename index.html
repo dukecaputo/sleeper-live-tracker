@@ -106,6 +106,10 @@
           <span>🎯 Lineup Optimizer</span>
           <span id="optimizer-nav-badge" class="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30 font-mono-num text-[10px]">PROPS+MC</span>
         </button>
+        <button onclick="switchTab('ros')" id="tab-btn-ros" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white flex items-center gap-1.5">
+          <span>🔮 Rest of Season</span>
+          <span id="ros-nav-badge" class="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 font-mono-num text-[10px]">W8–W17</span>
+        </button>
         <button onclick="switchTab('median')" id="tab-btn-median" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white">
           Median Forecast & Race
         </button>
@@ -117,7 +121,7 @@
           Model Info
         </button>
         <a href="./optimizer.html" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all bg-gradient-to-r from-sky-500/25 to-indigo-500/25 text-sky-300 border border-sky-400/40 hover:text-white flex items-center gap-1.5 ml-1">
-          <span>🚀 Standalone Optimizer + Backtest App ↗</span>
+          <span>🚀 Standalone Optimizer + ROS App ↗</span>
         </a>
       </div>
 
@@ -456,6 +460,15 @@
       </div>
     </div>
 
+    <!-- TAB 6: REST OF SEASON (ROS) STANDINGS, SCHEDULE & PLAYOFF FORECAST -->
+    <div id="tab-content-ros" class="hidden space-y-5">
+      <div id="ros-dynamic-body" class="space-y-5">
+        <div class="p-10 text-center text-slate-400 text-sm bg-[#171c28] border border-[#2b354b] rounded-2xl">
+          🔮 Running 6,000 Monte Carlo Rest-of-Season & Playoff Bracket Simulations (Weeks 8–17)...
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <script>
@@ -471,14 +484,15 @@
     let showBench = true;
     let countdownSec = 10;
 
-    // Optimizer State
+    // Optimizer & ROS State
     let activeTab = urlParams.get('tab') || 'matchups';
     let optimizerRosterId = 3; // Default: Hoon Lounge Hooners (@stephencaputo)
     let optimizerObjective = 'total_wins';
-    let optimizerMarketWeight = 0.75;
+    let optimizerMarketWeight = 1.0;
     let customSubsetPlayerIds = null;
     let customSubsetChooseK = null;
     let lastOptimizerResult = null;
+    let trackerRosResult = null;
 
     // Track previous starters & scores to detect real-time lineup changes & scoring plays
     let previousScores = {};
@@ -487,7 +501,7 @@
 
     function switchTab(tabName) {
       activeTab = tabName;
-      ['matchups', 'optimizer', 'median', 'activity', 'model'].forEach((t) => {
+      ['matchups', 'optimizer', 'ros', 'median', 'activity', 'model'].forEach((t) => {
         const content = document.getElementById(`tab-content-${t}`);
         const btn = document.getElementById(`tab-btn-${t}`);
         if (!content || !btn) return;
@@ -501,6 +515,8 @@
       });
       if (tabName === 'optimizer' && currentState) {
         runAndRenderOptimizer(false);
+      } else if (tabName === 'ros') {
+        ensureTrackerRosLoaded(false);
       }
     }
 
@@ -1936,6 +1952,235 @@
       `;
     }
 
+    async function ensureTrackerRosLoaded(force = false) {
+      if (!window.SleeperTrackerEngine || !window.SleeperTrackerEngine.runRestOfSeasonSimulation) return;
+      if (!force && trackerRosResult) {
+        renderTrackerRosTab();
+        return;
+      }
+      try {
+        trackerRosResult = await window.SleeperTrackerEngine.runRestOfSeasonSimulation(activeLeagueId, currentState, {
+          numSims: 6000,
+          marketWeight: optimizerMarketWeight
+        });
+        const badge = document.getElementById('ros-nav-badge');
+        const hooners = trackerRosResult.standingsProjections.find((x) => x.rosterId === optimizerRosterId) || trackerRosResult.standingsProjections[0];
+        if (badge && hooners) {
+          badge.textContent = `${formatPct(hooners.playoffProb)} PO • ${formatPct(hooners.champProb)} 🏆`;
+        }
+        renderTrackerRosTab();
+      } catch (err) {
+        console.error('Tracker ROS error:', err);
+      }
+    }
+
+    function selectTrackerRosTeam(rid) {
+      optimizerRosterId = Number(rid);
+      const badge = document.getElementById('ros-nav-badge');
+      if (badge && trackerRosResult) {
+        const tm = trackerRosResult.standingsProjections.find((x) => x.rosterId === optimizerRosterId);
+        if (tm) badge.textContent = `${formatPct(tm.playoffProb)} PO • ${formatPct(tm.champProb)} 🏆`;
+      }
+      renderTrackerRosTab();
+    }
+
+    function renderTrackerRosTab() {
+      const container = document.getElementById('ros-dynamic-body');
+      if (!container || !trackerRosResult) return;
+
+      const standings = trackerRosResult.standingsProjections || [];
+      const targetTeam = standings.find((t) => t.rosterId === Number(optimizerRosterId)) || standings[0];
+      if (!targetTeam) return;
+      const sched = trackerRosResult.teamSchedules?.[targetTeam.rosterId] || [];
+      const playoffSpots = trackerRosResult.playoffTeamsCount || 4;
+      const cutoffWins = trackerRosResult.expectedPlayoffCutoffWins || 15.8;
+
+      container.innerHTML = `
+        <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-4 shadow-xl flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-base font-extrabold text-white flex items-center gap-2">
+              <span>🔮 Rest of Season Standings, Schedule &amp; Playoff Bracket Simulator</span>
+              <span class="px-2 py-0.5 text-xs rounded-full bg-[#00ceb8]/15 text-[#00ceb8] border border-[#00ceb8]/30 font-mono-num">
+                ${trackerRosResult.numSims.toLocaleString()} Sims • W1–W17
+              </span>
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Combines official W1–W${trackerRosResult.lastScoredWeek} records, live Week ${trackerRosResult.currentNflWeek} state, optimal 14-starter bye-week lineups for Weeks ${trackerRosResult.currentNflWeek + 1}–${trackerRosResult.regularSeasonEndWeek}, and 2-week playoff rounds (W14–W17).
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            ${standings
+              .map(
+                (tm) => `
+              <button onclick="selectTrackerRosTeam(${tm.rosterId})" class="px-2.5 py-1 rounded-lg text-xs font-semibold transition border ${
+                  tm.rosterId === targetTeam.rosterId
+                    ? 'bg-[#00ceb8] text-slate-950 border-[#00ceb8]'
+                    : 'bg-[#121723] text-slate-300 border-[#2b354b] hover:border-sky-400/50'
+                }">
+                #${tm.projectedRank} ${tm.teamName} (${formatPct(tm.playoffProb)})
+              </button>
+            `
+              )
+              .join('')}
+          </div>
+        </div>
+
+        <!-- 4 KPI Cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-[#171c28] border border-[#00ceb8]/40 rounded-2xl p-4 shadow-xl">
+            <div class="flex items-center justify-between text-xs text-slate-400 font-bold uppercase">
+              <span>1. Proj Final Record (W13)</span>
+              <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono-num">Seed #${targetTeam.projectedRank}</span>
+            </div>
+            <div class="text-2xl font-extrabold font-mono-num text-white mt-1.5">
+              ${targetTeam.expectedWins.toFixed(1)} – ${targetTeam.expectedLosses.toFixed(1)}
+              <span class="text-xs font-normal text-slate-400">(${targetTeam.p10Wins.toFixed(0)}–${targetTeam.p90Wins.toFixed(0)} W)</span>
+            </div>
+            <div class="text-xs text-slate-400 mt-2">
+              Official W1–W${trackerRosResult.lastScoredWeek}: <b class="text-slate-200">${targetTeam.currentWins}-${targetTeam.currentLosses}</b> (${targetTeam.currentFpts.toFixed(1)} PF) • Live W${trackerRosResult.currentNflWeek}: <b class="text-emerald-400">+${(targetTeam.liveWeek?.expectedWins || 0).toFixed(2)} W</b>
+            </div>
+          </div>
+
+          <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-4 shadow-xl">
+            <div class="flex items-center justify-between text-xs text-slate-400 font-bold uppercase">
+              <span>2. Make Playoffs (Top ${playoffSpots})</span>
+              <span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono-num">Cutoff ~${cutoffWins}W</span>
+            </div>
+            <div class="text-2xl font-extrabold font-mono-num text-emerald-400 mt-1.5">
+              ${formatPct(targetTeam.playoffProb)}
+            </div>
+            <div class="text-xs text-slate-400 mt-2">
+              #1 Overall Seed: <b class="text-purple-300">${formatPct(targetTeam.firstSeedProb)}</b> • Top-2 Seed: <b class="text-slate-200">${formatPct(targetTeam.top2SeedProb)}</b>
+            </div>
+          </div>
+
+          <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-4 shadow-xl">
+            <div class="flex items-center justify-between text-xs text-slate-400 font-bold uppercase">
+              <span>3. Win Championship 🏆</span>
+              <span class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono-num">W14–W17</span>
+            </div>
+            <div class="text-2xl font-extrabold font-mono-num text-purple-300 mt-1.5">
+              ${formatPct(targetTeam.champProb)}
+            </div>
+            <div class="text-xs text-slate-400 mt-2">
+              Make Finals (W16–17): <b class="text-slate-200">${formatPct(targetTeam.finalsProb)}</b> • Playoff PPG: <b class="text-emerald-400">${targetTeam.playoffAvgPpg.toFixed(1)}</b>
+            </div>
+          </div>
+
+          <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-4 shadow-xl">
+            <div class="flex items-center justify-between text-xs text-slate-400 font-bold uppercase">
+              <span>4. Season PF &amp; Rem. SOS</span>
+              <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono-num">SOS #${targetTeam.sosRank}/10</span>
+            </div>
+            <div class="text-2xl font-extrabold font-mono-num text-sky-300 mt-1.5">
+              ${targetTeam.expectedSeasonPts.toFixed(1)} <span class="text-xs font-normal text-slate-400">PF</span>
+            </div>
+            <div class="text-xs text-slate-400 mt-2">
+              ROS W9–13 Optimal Avg: <b class="text-slate-200">${targetTeam.rosAvgPpg.toFixed(2)} PPG</b> • Opp Avg: <b class="text-slate-200">${targetTeam.sosAvgOppPpg.toFixed(1)}</b>
+            </div>
+          </div>
+        </div>
+
+        <!-- 10-Team ROS Standings Table -->
+        <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl">
+          <h3 class="text-sm font-bold text-white uppercase tracking-wider mb-3">
+            🏆 Projected Final Regular-Season Standings &amp; Playoff/Championship Odds (Click Any Team)
+          </h3>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="border-b border-[#2b354b] text-slate-400 uppercase">
+                  <th class="py-2.5 px-2">Seed</th>
+                  <th class="py-2.5 px-2">Team</th>
+                  <th class="py-2.5 px-2">W1–W${trackerRosResult.lastScoredWeek}</th>
+                  <th class="py-2.5 px-2">Live W${trackerRosResult.currentNflWeek}</th>
+                  <th class="py-2.5 px-2">ROS W9–13 PPG</th>
+                  <th class="py-2.5 px-2">Rem. SOS</th>
+                  <th class="py-2.5 px-2">Proj Final Record</th>
+                  <th class="py-2.5 px-2">80% Range</th>
+                  <th class="py-2.5 px-2">Proj Total PF</th>
+                  <th class="py-2.5 px-2">Playoff %</th>
+                  <th class="py-2.5 px-2">#1 Seed %</th>
+                  <th class="py-2.5 px-2">Finals %</th>
+                  <th class="py-2.5 px-2">Champ % 🏆</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${standings
+                  .map(
+                    (t) => `
+                  <tr onclick="selectTrackerRosTeam(${t.rosterId})" class="border-b border-[#2b354b]/60 hover:bg-[#1e2638] cursor-pointer ${
+                      t.rosterId === targetTeam.rosterId ? 'bg-[#00ceb8]/10' : ''
+                    } ${t.projectedRank === playoffSpots ? 'border-b-2 border-emerald-500/50' : ''}">
+                    <td class="py-2.5 px-2 font-mono-num font-bold ${t.projectedRank <= playoffSpots ? 'text-emerald-400' : 'text-slate-400'}">#${t.projectedRank}</td>
+                    <td class="py-2.5 px-2 font-bold text-white">${t.teamName} <span class="text-slate-400 font-normal">@${t.ownerName}</span></td>
+                    <td class="py-2.5 px-2 font-mono-num">${t.currentWins}-${t.currentLosses} (${t.currentFpts.toFixed(1)})</td>
+                    <td class="py-2.5 px-2 font-mono-num text-emerald-400">+${(t.liveWeek?.expectedWins || 0).toFixed(2)}W (${(t.liveWeek?.teamProj || 0).toFixed(1)})</td>
+                    <td class="py-2.5 px-2 font-mono-num font-bold text-sky-300">${t.rosAvgPpg.toFixed(2)}</td>
+                    <td class="py-2.5 px-2 font-mono-num">#${t.sosRank} (${t.sosAvgOppPpg.toFixed(1)})</td>
+                    <td class="py-2.5 px-2 font-mono-num font-extrabold text-white">${t.expectedWins.toFixed(1)} – ${t.expectedLosses.toFixed(1)}</td>
+                    <td class="py-2.5 px-2 font-mono-num text-slate-300">${t.p10Wins.toFixed(0)}–${t.p90Wins.toFixed(0)} W</td>
+                    <td class="py-2.5 px-2 font-mono-num text-[#00ceb8] font-bold">${t.expectedSeasonPts.toFixed(1)}</td>
+                    <td class="py-2.5 px-2 font-mono-num font-bold text-emerald-400">${formatPct(t.playoffProb)}</td>
+                    <td class="py-2.5 px-2 font-mono-num text-purple-300">${formatPct(t.firstSeedProb)}</td>
+                    <td class="py-2.5 px-2 font-mono-num">${formatPct(t.finalsProb)}</td>
+                    <td class="py-2.5 px-2 font-mono-num font-extrabold text-amber-300">${formatPct(t.champProb)}</td>
+                  </tr>
+                `
+                  )
+                  .join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Selected Team's Remaining Schedule (Weeks 8–13) -->
+        <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl">
+          <h3 class="text-sm font-bold text-white uppercase tracking-wider mb-3">
+            📅 ${targetTeam.teamName} — Week-by-Week Remaining Schedule &amp; Bye-Week Forecast (Weeks 8–13)
+          </h3>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="border-b border-[#2b354b] text-slate-400 uppercase">
+                  <th class="py-2 px-2">Week</th>
+                  <th class="py-2 px-2">Opponent</th>
+                  <th class="py-2 px-2">Your Optimal Proj</th>
+                  <th class="py-2 px-2">Opp Optimal Proj</th>
+                  <th class="py-2 px-2">Est. Median</th>
+                  <th class="py-2 px-2">Key Players on Bye</th>
+                  <th class="py-2 px-2">H2H Win %</th>
+                  <th class="py-2 px-2">Median Win %</th>
+                  <th class="py-2 px-2">2-0 Sweep %</th>
+                  <th class="py-2 px-2">E[Wins]</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${sched
+                  .map(
+                    (w) => `
+                  <tr class="border-b border-[#2b354b]/60">
+                    <td class="py-2.5 px-2 font-mono-num font-bold text-white">W${w.week} ${w.isLiveWeek ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">LIVE</span>' : ''}</td>
+                    <td class="py-2.5 px-2 font-semibold text-white">vs. ${w.oppTeamName}</td>
+                    <td class="py-2.5 px-2 font-mono-num font-bold text-sky-300">${w.teamProj.toFixed(2)}</td>
+                    <td class="py-2.5 px-2 font-mono-num">${w.oppProj.toFixed(2)}</td>
+                    <td class="py-2.5 px-2 font-mono-num text-slate-400">${w.leagueMedianProj.toFixed(2)}</td>
+                    <td class="py-2.5 px-2 text-amber-300">${(w.onByePlayers || []).map((p) => `${p.shortName} (${p.position})`).join(', ') || '<span class="text-emerald-400">✓ 0 Key Byes</span>'}</td>
+                    <td class="py-2.5 px-2 font-mono-num font-bold">${formatPct(w.h2hWinProb)}</td>
+                    <td class="py-2.5 px-2 font-mono-num font-bold">${formatPct(w.medianWinProb)}</td>
+                    <td class="py-2.5 px-2 font-mono-num text-purple-300">${formatPct(w.prob2_0)}</td>
+                    <td class="py-2.5 px-2 font-mono-num font-extrabold text-emerald-400">${w.expectedWins.toFixed(2)} W</td>
+                  </tr>
+                `
+                  )
+                  .join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
     function renderAll(data) {
       document.getElementById('league-name').textContent = data.league.name;
       document.getElementById('league-id-display').textContent = data.league.leagueId;
@@ -1951,6 +2196,7 @@
       renderSelectedMatchupDetail(data);
       renderMedianTab(data);
       runAndRenderOptimizer(false);
+      if (!trackerRosResult) ensureTrackerRosLoaded(false);
 
       for (const m of data.matchups) {
         if (m.teamA) previousScores[m.teamA.rosterId] = m.teamA.currentPts;
