@@ -1484,6 +1484,41 @@
             const outProj = (!s.outPlayer || s.outPlayer.playerId === '0') ? '0.00' : s.outPlayer.improvedProj.toFixed(2);
             const inP = s.inPlayer;
             const slotBadge = s.slot === 'SUPER_FLEX' ? 'SFLEX' : (s.slot === 'IDP_FLEX' ? 'IDP' : s.slot);
+            if (s.isDoubleSwap && Array.isArray(s.slideSteps) && s.slideSteps.length > 0) {
+              const slideText = s.slideSteps.map((step) => {
+                const fSlot = step.fromSlot === 'SUPER_FLEX' ? 'SFLEX' : (step.fromSlot === 'IDP_FLEX' ? 'IDP' : step.fromSlot);
+                const tSlot = step.toSlot === 'SUPER_FLEX' ? 'SFLEX' : (step.toSlot === 'IDP_FLEX' ? 'IDP' : step.toSlot);
+                const dualTag = Array.isArray(step.dualPositions) ? step.dualPositions.join('/') : (step.dualPositions || step.player.position);
+                return `<span class="text-purple-300 font-bold">⇄ Slide ${step.player.fullName} (${step.player.team} ${dualTag}, ${step.player.improvedProj.toFixed(2)}) ${fSlot} ➔ ${tSlot}</span>`;
+              }).join(' • ');
+              return `
+                <div class="p-3.5 rounded-xl bg-[#121723] border border-purple-500/45 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div class="flex items-start sm:items-center gap-3">
+                    <span class="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-purple-500/20 text-purple-300 border border-purple-500/40 shrink-0">⇄ ${slotBadge}</span>
+                    <div>
+                      <div class="text-[11px] font-bold uppercase tracking-wider text-purple-300 mb-0.5">2-Step Multi-Slot Double Swap (Positional Slide)</div>
+                      <div class="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
+                        <span class="text-rose-400 font-semibold line-through">${outName} (${outProj})</span>
+                        <span class="text-slate-400 font-bold">→</span>
+                        ${slideText}
+                        <span class="text-slate-400 font-bold">→</span>
+                        <span class="text-[#00ceb8] font-extrabold">${inP.fullName} (${inP.team} ${inP.position})</span>
+                        <span class="font-mono-num text-xs px-1.5 py-0.5 rounded bg-[#00ceb8]/20 text-[#00ceb8] font-bold">
+                          ${inP.improvedProj.toFixed(2)} pts (${formatSigned(s.projDelta)} Net)
+                        </span>
+                      </div>
+                      <div class="text-xs text-slate-300 mt-1 flex flex-wrap gap-1.5">
+                        ${s.reasons.map((r) => `<span class="px-2 py-0.5 rounded bg-[#1d263b] text-sky-300 border border-[#2e3c5c]">${r}</span>`).join('')}
+                      </div>
+                    </div>
+                  </div>
+                  <div class="text-right font-mono-num text-xs shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-[#232c3f]">
+                    <div class="text-slate-300">Net Edge: <strong class="text-emerald-300">${formatSigned(s.projDelta)} Vegas</strong></div>
+                    <div class="text-slate-400">Sleeper Net: ${formatSigned(s.sleeperDelta || (inP.sleeperProj - (s.outPlayer?.sleeperProj || 0)))}</div>
+                  </div>
+                </div>
+              `;
+            }
             return `
               <div class="p-3.5 rounded-xl bg-[#121723] border border-[#00ceb8]/35 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div class="flex items-start sm:items-center gap-3">
@@ -1664,6 +1699,9 @@
         const currP = opt.currentStarters[idx];
         const isSwappedIn = !currP || currP.playerId !== p.playerId;
         const isNewStarter = p.playerId !== '0' && !currIdsSet.has(p.playerId);
+        const isSlidStarter = isSwappedIn && !isNewStarter && p.playerId !== '0';
+        const prevSlotObj = isSlidStarter ? opt.currentStarters.find((cp) => cp && cp.playerId === p.playerId) : null;
+        const prevSlotLabel = prevSlotObj ? (prevSlotObj.slot === 'SUPER_FLEX' ? 'SFLEX' : (prevSlotObj.slot === 'IDP_FLEX' ? 'IDP' : prevSlotObj.slot)) : '';
         const slotLabel = p.slot === 'SUPER_FLEX' ? 'SFLEX' : (p.slot === 'IDP_FLEX' ? 'IDP' : p.slot);
         const sb = p.sportsbookRaw;
         let propSummary = '<span class="text-slate-500">Prediction Market + Vegas Implied Total</span>';
@@ -1679,7 +1717,7 @@
         }
         const mktDelta = p.improvedProj - p.sleeperProj;
         return `
-          <tr class="border-b border-[#232c3f] ${isNewStarter ? 'bg-[#00ceb8]/10' : ''}">
+          <tr class="border-b border-[#232c3f] ${isNewStarter ? 'bg-[#00ceb8]/10' : (isSlidStarter ? 'bg-purple-500/10' : '')}">
             <td class="py-2.5 px-2.5">
               <span class="px-2 py-0.5 rounded text-xs font-extrabold pos-${p.slot}">${slotLabel}</span>
             </td>
@@ -1688,8 +1726,9 @@
                 <span class="font-bold text-xs sm:text-sm text-white">${p.fullName}</span>
                 <span class="text-xs text-slate-400 font-mono-num">${p.team} ${p.position}</span>
                 ${isNewStarter ? '<span class="px-1.5 py-0.2 rounded bg-[#00ceb8] text-slate-950 text-[10px] font-extrabold">SWAP IN</span>' : ''}
+                ${isSlidStarter ? `<span class="px-1.5 py-0.2 rounded bg-purple-500/25 text-purple-300 border border-purple-500/40 text-[10px] font-extrabold">⇄ SLID FROM ${prevSlotLabel}</span>` : ''}
               </div>
-              ${isSwappedIn && currP ? `<div class="text-[11px] text-rose-400">Replaces: ${currP.fullName} (${currP.improvedProj.toFixed(2)})</div>` : ''}
+              ${isSwappedIn && currP ? `<div class="text-[11px] ${isSlidStarter ? 'text-purple-300' : 'text-rose-400'}">${isSlidStarter ? `Takes ${slotLabel} from benched ${currP.fullName} (${currP.improvedProj.toFixed(2)})` : `Replaces: ${currP.fullName} (${currP.improvedProj.toFixed(2)})`}</div>` : ''}
             </td>
             <td class="py-2.5 px-2.5 text-xs">${propSummary}</td>
             <td class="py-2.5 px-2 text-right font-mono-num text-xs text-amber-300 font-semibold">

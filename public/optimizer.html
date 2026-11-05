@@ -1064,7 +1064,7 @@
       const LEAGUE_ID = SleeperEngine.DEFAULT_LEAGUE_ID;
       let currentTab = 'optimizer';
       let selectedRosterId = 3; // Default: Hoon Lounge Hooners (@stephencaputo)
-      let selectedWeek = 8;
+      let selectedWeek = null; // Dynamically defaults to currentNflWeek on load
       let selectedObjective = 'total_wins';
       let selectedMarketWeight = 1.0; // Default: 100% Pure Vegas / Market Props
       let selectedMarketSource = 'consensus';
@@ -1204,11 +1204,23 @@
 
       async function loadWeekAndOptimize(forceRefresh = false) {
         const statusEl = document.getElementById('statusText');
-        statusEl.textContent = `Fetching Week ${selectedWeek} Sleeper, Underdog Fantasy (${selectedMarketSource}) & Vegas lines...`;
+        statusEl.textContent = `Fetching Sleeper, Underdog Fantasy (${selectedMarketSource}) & Vegas lines...`;
         try {
           const tsParam = forceRefresh ? `?_t=${Date.now()}` : '';
-          const nflState = await fetch(`https://api.sleeper.app/v1/state/nfl${tsParam}`).then((r) => r.json()).catch(() => ({ display_week: 8 }));
-          const currentNflWeek = Number(nflState.display_week || 8);
+          const nflState = await fetch(`https://api.sleeper.app/v1/state/nfl${tsParam}`).then((r) => r.json()).catch(() => ({ display_week: 9 }));
+          const currentNflWeek = Number(nflState.display_week || nflState.week || 9);
+          if (!selectedWeek) selectedWeek = currentNflWeek;
+
+          // Dynamically update #weekSelect labels so the current NFL week is marked (Live / Current)
+          const weekSel = document.getElementById('weekSelect');
+          if (weekSel) {
+            const opts = [];
+            for (let w = 1; w <= 17; w++) {
+              const tag = w < currentNflWeek ? ' (Completed)' : (w === currentNflWeek ? ' (Live / Current)' : (w >= 14 ? ' (Playoffs)' : ''));
+              opts.push(`<option value="${w}" ${w === selectedWeek ? 'selected' : ''}>Week ${w}${tag}</option>`);
+            }
+            weekSel.innerHTML = opts.join('');
+          }
 
           // If viewing a completed past week (< currentNflWeek), load its exact pregame state so we optimize pregame decisions
           if (selectedWeek < currentNflWeek) {
@@ -1788,115 +1800,259 @@
             }
           </div>
 
-          <!-- Actionable Swaps Between Active Explorer Lineup & Current Sleeper Lineup -->
-          ${
-            trueSwaps.length === 0
-              ? `
-                <div class="card" style="margin-bottom:18px; border-color: rgba(34, 197, 94, 0.4);">
-                  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
-                    <div>
-                      <span class="badge badge-green">✓ MATCHES CURRENT SLEEPER LINEUP</span>
-                      <span style="font-weight:700; margin-left:8px;">This lineup matches your currently set Sleeper starters.</span>
+          <!-- Actionable Swaps & Double-Swaps Between Active Explorer Lineup & Current Sleeper Lineup -->
+          ${(() => {
+            const rawStartersList = liveState.rostersData.find((r) => r.rosterId === selectedRosterId)?.rawStarters || [];
+            const activeStarterPids = new Set(activeEval.lineup.map((p) => String(p?.playerId || '0')));
+            const unappliedOptimalMoves = (optimizerResult.recommendedSwaps || []).filter(
+              (sw) => (sw.isTrueAddition || sw.isTrueRemoval) && sw.inPlayer && !activeStarterPids.has(String(sw.inPlayer.playerId))
+            );
+
+            const renderSwapCardHtml = (sw, idx, isApplied) => {
+              const outP = sw.outPlayer || {};
+              const inP = sw.inPlayer || {};
+              const isDouble = Boolean(sw.isDoubleSwap && sw.slideSteps && sw.slideSteps.length > 0);
+              const outSlotName = sw.outSlot || sw.slot;
+              const inSlotName = sw.inSlot || sw.slot;
+
+              if (isDouble) {
+                return `
+                  <div class="swap-card" style="border-color:rgba(192, 132, 252, 0.45); background:linear-gradient(135deg, rgba(30, 41, 66, 0.85) 0%, rgba(46, 16, 101, 0.35) 100%);">
+                    <div class="swap-players" style="gap:10px;">
+                      <div style="display:flex; flex-direction:column; align-items:center; gap:3px;">
+                        <div style="display:flex; align-items:center; gap:4px;">
+                          <span class="pos-pill pos-${outSlotName}" style="min-width:34px;">${outSlotName}</span>
+                          <span style="font-weight:800; color:var(--accent-purple); font-size:13px;">⇄</span>
+                          <span class="pos-pill pos-${inSlotName}" style="min-width:34px;">${inSlotName}</span>
+                        </div>
+                        <span class="badge badge-purple" style="font-size:9px; padding:1px 6px;">DOUBLE SWAP</span>
+                      </div>
+
+                      <!-- Step 1: Bench Out -->
+                      <div style="background:rgba(15,23,42,0.65); border:1px solid rgba(244,63,94,0.28); border-radius:8px; padding:6px 10px;">
+                        <div style="font-size:10px; color:#fda4af; font-weight:800; text-transform:uppercase;">1. BENCH OUT (${outSlotName})</div>
+                        <div style="font-weight:700; color:#fda4af;">
+                          ${outP.fullName || 'Empty Slot'} <span style="color:var(--text-muted); font-weight:500;">(${outP.team || 'FA'} ${outP.position || ''})</span>
+                        </div>
+                        <div class="mono" style="font-size:11px; color:var(--text-secondary);">
+                          Vegas: <b>${fmtNum(outP.improvedProj)}</b> • Slp: ${fmtNum(outP.sleeperProj)}
+                        </div>
+                      </div>
+
+                      <div style="font-size:18px; color:var(--accent-purple); font-weight:800;">➔</div>
+
+                      <!-- Step 2: Slide Starter -->
+                      ${sw.slideSteps
+                        .map(
+                          (st) => `
+                        <div style="background:rgba(15,23,42,0.65); border:1px solid rgba(192,132,252,0.4); border-radius:8px; padding:6px 10px;">
+                          <div style="font-size:10px; color:#d8b4fe; font-weight:800; text-transform:uppercase;">
+                            2. SLIDE STARTER (${st.fromSlot} ➔ ${st.toSlot})
+                          </div>
+                          <div style="font-weight:700; color:#e9d5ff;">
+                            ${st.player.fullName} <span class="badge badge-purple" style="font-size:9.5px; margin-left:3px;">Dual ${st.dualPositions}</span>
+                          </div>
+                          <div class="mono" style="font-size:11px; color:var(--text-secondary);">
+                            Vegas: <b>${fmtNum(st.player.improvedProj)}</b> (Stays in Lineup)
+                          </div>
+                        </div>
+                        <div style="font-size:18px; color:var(--accent-cyan); font-weight:800;">➔</div>
+                      `
+                        )
+                        .join('')}
+
+                      <!-- Step 3: Start In -->
+                      <div style="background:rgba(15,23,42,0.65); border:1px solid rgba(34,197,94,0.35); border-radius:8px; padding:6px 10px;">
+                        <div style="font-size:10px; color:#4ade80; font-weight:800; text-transform:uppercase;">3. START IN (${inSlotName})</div>
+                        <div style="font-weight:700; color:#4ade80;">
+                          ${inP.fullName} <span style="color:var(--text-secondary); font-weight:500;">(${inP.team} ${inP.position})</span>
+                        </div>
+                        <div class="mono" style="font-size:11px; color:var(--text-secondary);">
+                          Vegas: <b>${fmtNum(inP.improvedProj)}</b> • Slp: ${fmtNum(inP.sleeperProj)}
+                        </div>
+                      </div>
                     </div>
+
+                    <div style="text-align:right; max-width:440px; display:flex; flex-direction:column; align-items:flex-end; gap:5px;">
+                      <div style="display:flex; gap:6px; justify-content:flex-end; align-items:center; flex-wrap:wrap;">
+                        <span class="badge badge-green mono" style="font-size:12px;">${fmtDelta(sw.projDelta, 2, ' Net Vegas Pts')}</span>
+                        <span class="badge badge-purple mono">${fmtDelta(sw.sleeperDelta || 0, 2, ' Slp Pts')}</span>
+                        ${
+                          isApplied
+                            ? `<button type="button" class="btn" data-undo-swap-idx="${idx}" style="width:auto; padding:4px 10px; font-size:11px; border-color:rgba(244,63,94,0.45); color:#fda4af;">↩ Undo Double Swap</button>`
+                            : `<button type="button" class="btn btn-primary" data-apply-opt-swap-idx="${idx}" style="width:auto; padding:4px 10px; font-size:11px;">⚡ Apply Double Swap</button>`
+                        }
+                      </div>
+                      <div style="font-size:11.5px; color:var(--text-secondary);">
+                        ${sw.summaryReason}
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }
+
+              return `
+                <div class="swap-card">
+                  <div class="swap-players">
+                    <span class="pos-pill pos-${outSlotName}">${outSlotName}</span>
+                    <div>
+                      <div style="font-size:11px; color:var(--text-muted); font-weight:700;">BENCH / MOVE OUT</div>
+                      <div style="font-weight:700; color:#fda4af;">
+                        ${outP.fullName || 'Empty Slot'} <span style="color:var(--text-muted); font-weight:500;">(${outP.team || 'FA'} ${outP.position || ''})</span>
+                      </div>
+                      <div class="mono" style="font-size:11.5px; color:var(--text-secondary);">
+                        Vegas Proj: <b>${fmtNum(outP.improvedProj)}</b> • Sleeper: ${fmtNum(outP.sleeperProj)}
+                      </div>
+                    </div>
+                    <div style="font-size:20px; color:var(--accent-cyan); font-weight:800;">➔</div>
+                    <div>
+                      <div style="font-size:11px; color:#4ade80; font-weight:700;">START / SWAP IN</div>
+                      <div style="font-weight:700; color:#4ade80;">
+                        ${inP.fullName} <span style="color:var(--text-secondary); font-weight:500;">(${inP.team} ${inP.position})</span>
+                      </div>
+                      <div class="mono" style="font-size:11.5px; color:var(--text-secondary);">
+                        Vegas Proj: <b>${fmtNum(inP.improvedProj)}</b> • Sleeper: ${fmtNum(inP.sleeperProj)}
+                      </div>
+                    </div>
+                  </div>
+                  <div style="text-align:right; max-width:460px; display:flex; flex-direction:column; align-items:flex-end; gap:5px;">
+                    <div style="display:flex; gap:6px; justify-content:flex-end; align-items:center; flex-wrap:wrap;">
+                      <span class="badge badge-cyan mono">${fmtDelta(sw.projDelta, 2, ' Vegas Pts')}</span>
+                      ${
+                        isApplied
+                          ? `<button type="button" class="btn" data-undo-swap-idx="${idx}" style="width:auto; padding:4px 10px; font-size:11px; border-color:rgba(244,63,94,0.45); color:#fda4af;">↩ Undo Move</button>`
+                          : `<button type="button" class="btn btn-primary" data-apply-opt-swap-idx="${idx}" style="width:auto; padding:4px 10px; font-size:11px;">⚡ Apply Move</button>`
+                      }
+                    </div>
+                    <div style="font-size:11.5px; color:var(--text-secondary);">
+                      ${sw.summaryReason}
+                    </div>
+                  </div>
+                </div>
+              `;
+            };
+
+            return `
+              <div class="card" style="margin-bottom:18px;">
+                <div class="card-title" style="flex-wrap:wrap; gap:8px;">
+                  <span>🔥 Active Lineup Moves & Multi-Slot Double Swaps vs. Current Sleeper Starters (${trueSwaps.length} Active Move${trueSwaps.length === 1 ? '' : 's'})</span>
+                  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <span class="badge badge-green">${fmtDelta(dWinsVsCurr, 3, ' Expected Wins')} (${fmtDelta(dPtsVsCurr, 2, ' Vegas Pts')})</span>
                     ${
-                      (optimizerResult.recommendedSwaps || []).filter((s) => s.isTrueAddition || s.isTrueRemoval).length > 0
-                        ? `<button class="btn btn-primary" id="loadOptimalFromBannerBtn" style="width:auto; padding:5px 12px;">⚡ Load #1 Optimal Lineup (${(optimizerResult.recommendedSwaps || []).filter((s) => s.isTrueAddition || s.isTrueRemoval).length} Recommended Swaps)</button>`
+                      unappliedOptimalMoves.length > 0
+                        ? `<button type="button" class="btn btn-primary" id="loadOptimalFromBannerBtn" style="width:auto; padding:4px 10px; font-size:11px;">⚡ Apply All ${unappliedOptimalMoves.length} Remaining Optimal Move${unappliedOptimalMoves.length === 1 ? '' : 's'}</button>`
                         : ''
                     }
                   </div>
                 </div>
-              `
-              : `
-                <div class="card" style="margin-bottom:18px;">
-                  <div class="card-title">
-                    <span>🔥 Active Lineup Changes vs. Your Current Sleeper Starters (${trueSwaps.length} Move${trueSwaps.length > 1 ? 's' : ''})</span>
-                    <span class="badge badge-green">${fmtDelta(dWinsVsCurr, 3, ' Expected Wins')} (${fmtDelta(dPtsVsCurr, 2, ' Vegas Pts')})</span>
-                  </div>
-                  <div class="swap-list">
-                    ${trueSwaps
-                      .map((sw) => {
-                        const outP = sw.outPlayer || {};
-                        const inP = sw.inPlayer || {};
-                        return `
-                          <div class="swap-card">
-                            <div class="swap-players">
-                              <span class="pos-pill pos-${sw.slot}">${sw.slot}</span>
-                              <div>
-                                <div style="font-size:11px; color:var(--text-muted); font-weight:700;">BENCH / MOVE OUT</div>
-                                <div style="font-weight:700; color:#fda4af;">
-                                  ${outP.fullName || 'Empty Slot'} <span style="color:var(--text-muted); font-weight:500;">(${outP.team || 'FA'} ${outP.position || ''})</span>
-                                </div>
-                                <div class="mono" style="font-size:11.5px; color:var(--text-secondary);">
-                                  Vegas Proj: <b>${fmtNum(outP.improvedProj)}</b> • Sleeper: ${fmtNum(outP.sleeperProj)}
-                                </div>
-                              </div>
-                              <div style="font-size:20px; color:var(--accent-cyan); font-weight:800;">➔</div>
-                              <div>
-                                <div style="font-size:11px; color:#4ade80; font-weight:700;">START / SWAP IN</div>
-                                <div style="font-weight:700; color:#4ade80;">
-                                  ${inP.fullName} <span style="color:var(--text-secondary); font-weight:500;">(${inP.team} ${inP.position})</span>
-                                </div>
-                                <div class="mono" style="font-size:11.5px; color:var(--text-secondary);">
-                                  Vegas Proj: <b>${fmtNum(inP.improvedProj)}</b> • Sleeper: ${fmtNum(inP.sleeperProj)}
-                                </div>
-                              </div>
-                            </div>
-                            <div style="text-align:right; max-width:460px;">
-                              <div style="display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap; margin-bottom:4px;">
-                                <span class="badge badge-cyan mono">${fmtDelta(sw.projDelta, 2, ' Vegas Pts')}</span>
-                              </div>
-                              <div style="font-size:11.5px; color:var(--text-secondary);">
-                                ${sw.summaryReason}
-                              </div>
-                            </div>
-                          </div>
-                        `;
-                      })
-                      .join('')}
-                  </div>
-                </div>
-              `
-          }
+                ${
+                  trueSwaps.length > 0
+                    ? `<div class="swap-list">${trueSwaps.map((sw, idx) => renderSwapCardHtml(sw, idx, true)).join('')}</div>`
+                    : `<div style="font-size:12.5px; color:#4ade80; font-weight:600; margin-bottom:${unappliedOptimalMoves.length ? '12px' : '0'};">✓ Active explorer lineup currently matches your set Sleeper starters.</div>`
+                }
+                ${
+                  unappliedOptimalMoves.length > 0
+                    ? `
+                      <div style="margin-top:${trueSwaps.length ? '14px' : '4px'}; padding-top:12px; border-top:1px solid rgba(148,163,184,0.16);">
+                        <div style="font-size:11px; font-weight:800; color:var(--accent-cyan); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">
+                          💡 Available Optimal Single & Double Swaps You Can Apply (1-Click Test):
+                        </div>
+                        <div class="swap-list">
+                          ${unappliedOptimalMoves
+                            .map((sw) => {
+                              const optIdx = (optimizerResult.recommendedSwaps || []).indexOf(sw);
+                              return renderSwapCardHtml(sw, optIdx, false);
+                            })
+                            .join('')}
+                        </div>
+                      </div>
+                    `
+                    : ''
+                }
+              </div>
+            `;
+          })()}
 
           <!-- Interactive 14-Slot Lineup Builder & Quick Bench Swap Drawer -->
           <div class="card" style="margin-bottom:18px;">
             <div class="card-title" style="flex-wrap:wrap; gap:8px;">
-              <span>📋 Interactive 14-Slot Lineup Builder — Swap Any Slot to Test Distribution & Volatility</span>
+              <span>📋 Interactive 14-Slot Lineup Builder — Supports Direct Swaps & Automatic Multi-Slot Double Swaps</span>
               <span style="font-size:11.5px; color:var(--text-muted); text-transform:none;">
-                Tap any slot dropdown or click a <b>Quick Bench Swap</b> pill below to test lineup changes in real time
+                Tap any slot dropdown or click a <b>Quick Bench Swap / Double Swap</b> pill below to test lineup changes in real time
               </span>
             </div>
 
-            <!-- Quick Bench Contenders Bar -->
+            <!-- Quick Bench Contenders Bar (Direct + Double-Swap Aware) -->
             <div style="background:rgba(15,23,42,0.75); border:1px solid var(--border-subtle); border-radius:10px; padding:10px 12px; margin-bottom:14px;">
               <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">
-                ⚡ Quick Bench Swap — Tap to Sub Top Bench Contender into Lowest-Projected Eligible Slot:
+                ⚡ Quick Bench Swap & Double-Swap Bar — Tap Any Bench Contender to Sub into Best Direct or Multi-Slot Slide:
               </div>
               <div style="display:flex; flex-wrap:wrap; gap:8px;">
                 ${benchContenders
                   .map((bp) => {
-                    let targetSlotIdx = -1;
-                    let lowestPts = Infinity;
+                    // 1. Best direct single-slot replacement (lowest projected currently starting player in a slot bp can play)
+                    let bestDirectSlotIdx = -1;
+                    let lowestDirectPts = Infinity;
                     optimizerResult.slots.forEach((slotName, sIdx) => {
                       if (optimizerResult.isEligibleForSlot(bp, slotName)) {
                         const currP = activeEval.lineup[sIdx];
                         const pts = currP ? currP.improvedProj || 0 : 0;
-                        if (pts < lowestPts) {
-                          lowestPts = pts;
-                          targetSlotIdx = sIdx;
+                        if (pts < lowestDirectPts) {
+                          lowestDirectPts = pts;
+                          bestDirectSlotIdx = sIdx;
                         }
                       }
                     });
-                    if (targetSlotIdx < 0) return '';
-                    const replacedP = activeEval.lineup[targetSlotIdx];
+
+                    // 2. Check if there is an even better 2-step Double Swap (sliding a dual-eligible starter from midSlotIdx ➔ outSlotIdx so bp enters midSlotIdx)
+                    let bestDoubleMove = null;
+                    optimizerResult.slots.forEach((midSlotName, midIdx) => {
+                      if (!optimizerResult.isEligibleForSlot(bp, midSlotName)) return;
+                      const midStarter = activeEval.lineup[midIdx];
+                      if (!midStarter || midStarter.playerId === '0') return;
+                      optimizerResult.slots.forEach((outSlotName, outIdx) => {
+                        if (outIdx === midIdx) return;
+                        if (!optimizerResult.isEligibleForSlot(midStarter, outSlotName)) return;
+                        const outStarter = activeEval.lineup[outIdx];
+                        const outPts = outStarter ? outStarter.improvedProj || 0 : 0;
+                        if (outPts + 0.05 < lowestDirectPts) {
+                          if (!bestDoubleMove || outPts < bestDoubleMove.outPts) {
+                            bestDoubleMove = {
+                              midIdx,
+                              midSlotName,
+                              midStarter,
+                              outIdx,
+                              outSlotName,
+                              outStarter,
+                              outPts
+                            };
+                          }
+                        }
+                      });
+                    });
+
+                    if (bestDoubleMove) {
+                      const netDelta = (bp.improvedProj || 0) - bestDoubleMove.outPts;
+                      return `
+                        <button class="btn" data-quick-double-bench="${bp.playerId}" data-quick-mid-slot="${bestDoubleMove.midIdx}" data-quick-out-slot="${bestDoubleMove.outIdx}" style="width:auto; display:inline-flex; align-items:center; gap:7px; padding:6px 10px; font-size:11.5px; border-color:rgba(192,132,252,0.5);">
+                          <span class="pos-pill pos-${bp.canonicalPos}" style="min-width:28px; font-size:10px;">${bp.canonicalPos}</span>
+                          <span><b>${bp.shortName}</b> (${bp.team} • ${fmtNum(bp.improvedProj, 1)})</span>
+                          <span class="badge badge-purple" style="font-size:9.5px; padding:1px 5px;">⇄ Double Swap (${fmtDelta(netDelta, 2)})</span>
+                          <span style="color:var(--text-secondary); font-size:10.5px;">Slide ${bestDoubleMove.midStarter.shortName} ➔ ${bestDoubleMove.outSlotName} (Bench ${bestDoubleMove.outStarter?.shortName || 'Empty'})</span>
+                        </button>
+                      `;
+                    }
+
+                    if (bestDirectSlotIdx < 0) return '';
+                    const replacedP = activeEval.lineup[bestDirectSlotIdx];
                     const sameTeamCnt = activeTeamCounts.get(bp.team) || 0;
                     const sameTeamTag = sameTeamCnt > 0 ? `<span class="badge badge-amber" style="font-size:9.5px; padding:1px 5px;">${bp.team} ×${sameTeamCnt + 1}</span>` : '';
                     return `
-                      <button class="btn" data-quick-bench-pid="${bp.playerId}" data-quick-slot="${targetSlotIdx}" style="width:auto; display:inline-flex; align-items:center; gap:7px; padding:6px 10px; font-size:11.5px;">
+                      <button class="btn" data-quick-bench-pid="${bp.playerId}" data-quick-slot="${bestDirectSlotIdx}" style="width:auto; display:inline-flex; align-items:center; gap:7px; padding:6px 10px; font-size:11.5px;">
                         <span class="pos-pill pos-${bp.canonicalPos}" style="min-width:28px; font-size:10px;">${bp.canonicalPos}</span>
                         <span><b>${bp.shortName}</b> (${bp.team} • ${fmtNum(bp.improvedProj, 1)})</span>
                         ${sameTeamTag}
-                        <span style="color:var(--text-muted); font-size:10.5px;">➔ ${optimizerResult.slots[targetSlotIdx]} (${replacedP?.shortName || 'Empty'})</span>
+                        <span style="color:var(--text-muted); font-size:10.5px;">➔ ${optimizerResult.slots[bestDirectSlotIdx]} (${replacedP?.shortName || 'Empty'})</span>
                       </button>
                     `;
                   })
@@ -1905,9 +2061,16 @@
             </div>
 
             ${(() => {
+              const rawStartersList = liveState.rostersData.find((r) => r.rosterId === selectedRosterId)?.rawStarters || [];
+              const activePids = new Set(activeEval.lineup.map((st) => String(st?.playerId || '0')));
+
               const slotItems = activeEval.lineup.map((p, slotIdx) => {
                 const slotName = optimizerResult.slots[slotIdx];
+                const rawStAtSlot = rawStartersList[slotIdx];
                 const isNewVsCurrent = !currentStarterSet.has(p.playerId);
+                const prevRawSlotIdx = rawStartersList.findIndex((rs) => rs && rs.playerId === p.playerId);
+                const isSlidFromAnotherSlot = !isNewVsCurrent && prevRawSlotIdx >= 0 && prevRawSlotIdx !== slotIdx;
+                const slidFromSlotName = isSlidFromAnotherSlot ? optimizerResult.slots[prevRawSlotIdx] : null;
                 const isInOptimal = optimalStarterSet.has(p.playerId);
                 const sb = p.sportsbookProps;
                 const propSummary = sb
@@ -1940,7 +2103,7 @@
                   optimizerResult.isEligibleForSlot(cand, slotName)
                 );
 
-                const optionsHtml = eligiblePlayers
+                const directOptionsHtml = eligiblePlayers
                   .map((cand) => {
                     const isCurrentSlotPlayer = cand.playerId === p.playerId;
                     const otherSlotIdx = activeEval.lineup.findIndex(
@@ -1949,7 +2112,7 @@
                     const statusPrefix = isCurrentSlotPlayer
                       ? '✓ '
                       : otherSlotIdx >= 0
-                      ? `[In ${optimizerResult.slots[otherSlotIdx]}] `
+                      ? `[Slide from ${optimizerResult.slots[otherSlotIdx]}] `
                       : '[BENCH] ';
                     const candTeamCnt =
                       !['DL', 'LB', 'DB'].includes(cand.canonicalPos)
@@ -1960,11 +2123,40 @@
                   })
                   .join('');
 
+                // Also discover any Double-Swap bench players who cannot play `slotName` directly,
+                // but CAN replace `p` at `slotIdx` by sliding a dual-eligible starter from `midIdx` ➔ `slotIdx`!
+                const doubleSwapOptions = [];
+                for (let midIdx = 0; midIdx < optimizerResult.slots.length; midIdx++) {
+                  if (midIdx === slotIdx) continue;
+                  const midStarter = activeEval.lineup[midIdx];
+                  if (!midStarter || midStarter.playerId === '0') continue;
+                  if (!optimizerResult.isEligibleForSlot(midStarter, slotName)) continue;
+                  const midSlotName = optimizerResult.slots[midIdx];
+                  for (const benchCand of (optimizerResult.allRosterPlayers || [])) {
+                    if (activePids.has(String(benchCand.playerId))) continue;
+                    if (optimizerResult.isEligibleForSlot(benchCand, slotName)) continue; // already in direct list
+                    if (!optimizerResult.isEligibleForSlot(benchCand, midSlotName)) continue;
+                    const netEdge = Number(((benchCand.improvedProj || 0) - (p.improvedProj || 0)).toFixed(2));
+                    doubleSwapOptions.push(
+                      `<option value="double:${midIdx}:${benchCand.playerId}">⇄ [DOUBLE SWAP ${fmtDelta(netEdge, 2)}] Start ${benchCand.fullName} (${benchCand.position}, ${fmtNum(benchCand.improvedProj, 2)}) in ${midSlotName} & Slide ${midStarter.shortName} ➔ ${slotName}</option>`
+                    );
+                  }
+                }
+
+                const optionsHtml =
+                  directOptionsHtml +
+                  (doubleSwapOptions.length > 0
+                    ? `<optgroup label="⇄ Multi-Slot Double Swaps (Slide Dual-Eligible Starter)">${doubleSwapOptions.join('')}</optgroup>`
+                    : '');
+
                 return {
                   p,
                   slotIdx,
                   slotName,
+                  rawStAtSlot,
                   isNewVsCurrent,
+                  isSlidFromAnotherSlot,
+                  slidFromSlotName,
                   isInOptimal,
                   propSummary,
                   sameTeamBadge,
@@ -1999,12 +2191,14 @@
                       ${slotItems
                         .map(
                           (it) => `
-                          <tr class="${it.isNewVsCurrent ? 'row-swap' : ''}">
+                          <tr class="${it.isNewVsCurrent || it.isSlidFromAnotherSlot ? 'row-swap' : ''}">
                             <td><span class="pos-pill pos-${it.slotName}">${it.slotName}</span></td>
                             <td>
                               ${
                                 it.isNewVsCurrent
                                   ? '<span class="badge badge-green">SWAP IN</span>'
+                                  : it.isSlidFromAnotherSlot
+                                  ? `<span class="badge badge-purple">⇄ SLID FROM ${it.slidFromSlotName}</span>`
                                   : '<span class="badge" style="background:rgba(148,163,184,0.12); color:var(--text-secondary);">STARTER</span>'
                               }
                               ${!it.isInOptimal ? '<div style="margin-top:3px;"><span class="badge badge-amber" style="font-size:9.5px;">Custom</span></div>' : ''}
@@ -2043,13 +2237,15 @@
                   ${slotItems
                     .map(
                       (it) => `
-                      <div class="mobile-slot-card ${it.isNewVsCurrent ? 'card-swap' : ''}">
+                      <div class="mobile-slot-card ${it.isNewVsCurrent || it.isSlidFromAnotherSlot ? 'card-swap' : ''}">
                         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
                           <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                             <span class="pos-pill pos-${it.slotName}">${it.slotName}</span>
                             ${
                               it.isNewVsCurrent
                                 ? '<span class="badge badge-green">SWAP IN</span>'
+                                : it.isSlidFromAnotherSlot
+                                ? `<span class="badge badge-purple">⇄ SLID FROM ${it.slidFromSlotName}</span>`
                                 : '<span class="badge" style="background:rgba(148,163,184,0.12); color:var(--text-secondary);">STARTER</span>'
                             }
                             ${it.sameTeamBadge}
@@ -2158,7 +2354,7 @@
           </div>
         `;
 
-        // Attach interactive event listeners for presets, candidate lineups, slot dropdowns, and quick bench swaps
+        // Attach interactive event listeners for presets, candidate lineups, undo/apply swap buttons, slot dropdowns, and quick bench swaps
         container.querySelectorAll('[data-lineup-preset]').forEach((btn) => {
           btn.addEventListener('click', () => {
             const presetId = btn.getAttribute('data-lineup-preset');
@@ -2183,6 +2379,44 @@
           });
         });
 
+        // 1-Click Undo Move / Undo Double-Swap (reverts all involved slots back to Current Sleeper Starters)
+        container.querySelectorAll('[data-undo-swap-idx]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const idx = Number(btn.getAttribute('data-undo-swap-idx'));
+            const sw = trueSwaps[idx];
+            const rawStartersList = liveState.rostersData.find((r) => r.rosterId === selectedRosterId)?.rawStarters || [];
+            if (sw && rawStartersList.length) {
+              const indicesToRevert = sw.involvedSlotIndices || [sw.slotIndex];
+              for (const sIdx of indicesToRevert) {
+                if (rawStartersList[sIdx]) {
+                  activeCustomLineup[sIdx] = { ...rawStartersList[sIdx], slot: optimizerResult.slots[sIdx] };
+                }
+              }
+              activePresetId = 'custom';
+              renderOptimizerTab();
+            }
+          });
+        });
+
+        // 1-Click Apply Recommended Single Swap or Double-Swap
+        container.querySelectorAll('[data-apply-opt-swap-idx]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const idx = Number(btn.getAttribute('data-apply-opt-swap-idx'));
+            const sw = (optimizerResult.recommendedSwaps || [])[idx];
+            const optLineup = optimizerResult.optimalCandidate?.lineup || [];
+            if (sw && optLineup.length) {
+              const indicesToApply = sw.involvedSlotIndices || [sw.slotIndex];
+              for (const sIdx of indicesToApply) {
+                if (optLineup[sIdx]) {
+                  activeCustomLineup[sIdx] = { ...optLineup[sIdx], slot: optimizerResult.slots[sIdx] };
+                }
+              }
+              activePresetId = 'custom';
+              renderOptimizerTab();
+            }
+          });
+        });
+
         const resetBtn = document.getElementById('resetOptimalBtn') || document.getElementById('loadOptimalFromBannerBtn');
         if (resetBtn) {
           resetBtn.addEventListener('click', () => {
@@ -2195,7 +2429,25 @@
         container.querySelectorAll('.slot-player-select').forEach((sel) => {
           sel.addEventListener('change', (e) => {
             const slotIdx = Number(e.target.getAttribute('data-slot-index'));
-            const newPid = String(e.target.value);
+            const rawVal = String(e.target.value);
+
+            // Handle explicit 2-step Double Swap option (`double:midIdx:benchPid`)
+            if (rawVal.startsWith('double:')) {
+              const parts = rawVal.split(':');
+              const midIdx = Number(parts[1]);
+              const benchPid = parts[2];
+              const midStarter = activeCustomLineup[midIdx];
+              const benchPlayer = (optimizerResult.allRosterPlayers || []).find((p) => String(p.playerId) === String(benchPid));
+              if (midStarter && benchPlayer) {
+                activeCustomLineup[slotIdx] = { ...midStarter, slot: optimizerResult.slots[slotIdx] };
+                activeCustomLineup[midIdx] = { ...benchPlayer, slot: optimizerResult.slots[midIdx] };
+                activePresetId = 'custom';
+                renderOptimizerTab();
+              }
+              return;
+            }
+
+            const newPid = rawVal;
             const newPlayer = (optimizerResult.allRosterPlayers || []).find((p) => String(p.playerId) === newPid);
             if (!newPlayer) return;
 
@@ -2204,7 +2456,7 @@
               (st, idx) => idx !== slotIdx && st && String(st.playerId) === newPid
             );
 
-            // If newPlayer was already starting in another slot, swap the two slots if eligible (or backfill from bench)
+            // Case A: newPlayer was already starting in another slot (`existingOtherSlotIdx`)
             if (existingOtherSlotIdx >= 0) {
               const otherSlotName = optimizerResult.slots[existingOtherSlotIdx];
               if (oldPlayerInSlot && optimizerResult.isEligibleForSlot(oldPlayerInSlot, otherSlotName)) {
@@ -2220,6 +2472,24 @@
                   activeCustomLineup[existingOtherSlotIdx] = { ...replacement, slot: otherSlotName };
                 }
               }
+            } else if (oldPlayerInSlot && oldPlayerInSlot.playerId !== '0') {
+              // Case B: newPlayer is from the Bench (`Zack Baun` -> `LB`), and `oldPlayerInSlot` (`Greg Rousseau` in `LB`, 6.05)
+              // has dual eligibility to slide into another slot (`DL`) where the current starter (`Chase Young`, 3.77) is lower projected!
+              let bestSlideIdx = -1;
+              let lowestSlidePts = (oldPlayerInSlot.improvedProj || 0) - 0.1;
+              optimizerResult.slots.forEach((sName, sIdx) => {
+                if (sIdx === slotIdx) return;
+                if (!optimizerResult.isEligibleForSlot(oldPlayerInSlot, sName)) return;
+                const occ = activeCustomLineup[sIdx];
+                const occPts = occ ? occ.improvedProj || 0 : 0;
+                if (occPts < lowestSlidePts) {
+                  lowestSlidePts = occPts;
+                  bestSlideIdx = sIdx;
+                }
+              });
+              if (bestSlideIdx >= 0) {
+                activeCustomLineup[bestSlideIdx] = { ...oldPlayerInSlot, slot: optimizerResult.slots[bestSlideIdx] };
+              }
             }
 
             activeCustomLineup[slotIdx] = { ...newPlayer, slot: optimizerResult.slots[slotIdx] };
@@ -2228,6 +2498,7 @@
           });
         });
 
+        // Quick Bench Swap (Single-Slot)
         container.querySelectorAll('[data-quick-bench-pid]').forEach((btn) => {
           btn.addEventListener('click', () => {
             const pid = String(btn.getAttribute('data-quick-bench-pid'));
@@ -2235,6 +2506,23 @@
             const benchP = (optimizerResult.allRosterPlayers || []).find((p) => String(p.playerId) === pid);
             if (benchP && slotIdx >= 0 && slotIdx < activeCustomLineup.length) {
               activeCustomLineup[slotIdx] = { ...benchP, slot: optimizerResult.slots[slotIdx] };
+              activePresetId = 'custom';
+              renderOptimizerTab();
+            }
+          });
+        });
+
+        // Quick Bench Double-Swap (2-Step Slide + Sub)
+        container.querySelectorAll('[data-quick-double-bench]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const benchPid = String(btn.getAttribute('data-quick-double-bench'));
+            const midIdx = Number(btn.getAttribute('data-quick-mid-slot'));
+            const outIdx = Number(btn.getAttribute('data-quick-out-slot'));
+            const midStarter = activeCustomLineup[midIdx];
+            const benchP = (optimizerResult.allRosterPlayers || []).find((p) => String(p.playerId) === benchPid);
+            if (midStarter && benchP && midIdx >= 0 && outIdx >= 0) {
+              activeCustomLineup[outIdx] = { ...midStarter, slot: optimizerResult.slots[outIdx] };
+              activeCustomLineup[midIdx] = { ...benchP, slot: optimizerResult.slots[midIdx] };
               activePresetId = 'custom';
               renderOptimizerTab();
             }
