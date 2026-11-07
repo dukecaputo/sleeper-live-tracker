@@ -3,213 +3,383 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fantasy Fortèball — Real-Time Sleeper Tracker & Monte Carlo Forecast</title>
+  <title>FANTASYCAST FOOTBALL — Fantasy Fortèball Live Matchup & Median Tracker</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="./engine.js"></script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
 
     :root {
-      --slp-bg: #0f131c;
-      --slp-surface: #171c28;
-      --slp-card: #1d2433;
-      --slp-card-hover: #242d40;
-      --slp-border: #2b354b;
-      --slp-mint: #00ceb8;
-      --slp-blue: #38bdf8;
-      --slp-purple: #818cf8;
-      --slp-amber: #fbbf24;
-      --slp-rose: #fb7185;
+      --fc-header-top: #23a942;
+      --fc-header-mid: #14892f;
+      --fc-header-bot: #0b631d;
+      --fc-turf-light: #205c16;
+      --fc-turf-mid: #15400e;
+      --fc-turf-dark: #0b2407;
+      --fc-metal-top: #373a40;
+      --fc-metal-mid: #202327;
+      --fc-metal-bot: #121417;
+      --fc-border-hi: #4f545c;
+      --fc-border-lo: #08090a;
+      --fc-gold: #e8c500;
+      --fc-lime: #4ee468;
+      --fc-red: #d91b1b;
     }
 
     body {
-      background-color: var(--slp-bg);
-      color: #f1f5f9;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: radial-gradient(circle at 68% 22%, #226018 0%, #143d0e 52%, #0a2006 100%);
+      background-attachment: fixed;
+      color: #eef2f5;
+      font-family: Arial, 'Helvetica Neue', Helvetica, 'Inter', sans-serif;
+    }
+
+    .fc-banner-title {
+      font-family: 'Oswald', 'Arial Narrow', Impact, sans-serif;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      text-shadow: 0 2px 3px rgba(0, 0, 0, 0.55);
     }
 
     .font-mono-num {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: Arial, 'Helvetica Neue', 'JetBrains Mono', sans-serif;
       font-variant-numeric: tabular-nums;
     }
 
-    /* Sleeper Position Badges */
-    .pos-QB { background: rgba(255, 90, 138, 0.16); color: #ff6b98; border: 1px solid rgba(255, 90, 138, 0.35); }
-    .pos-RB { background: rgba(0, 206, 184, 0.16); color: #00e5cc; border: 1px solid rgba(0, 206, 184, 0.35); }
-    .pos-WR { background: rgba(86, 182, 255, 0.16); color: #67c0ff; border: 1px solid rgba(86, 182, 255, 0.35); }
-    .pos-TE { background: rgba(255, 174, 88, 0.16); color: #ffba6b; border: 1px solid rgba(255, 174, 88, 0.35); }
-    .pos-FLEX { background: rgba(168, 85, 247, 0.16); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); }
-    .pos-SUPER_FLEX { background: rgba(236, 72, 153, 0.18); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.4); }
-    .pos-DL, .pos-DE, .pos-DT { background: rgba(249, 115, 22, 0.16); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.35); }
-    .pos-LB { background: rgba(139, 92, 246, 0.16); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.35); }
-    .pos-DB, .pos-CB, .pos-S { background: rgba(20, 184, 166, 0.16); color: #2dd4bf; border: 1px solid rgba(20, 184, 166, 0.35); }
-    .pos-IDP_FLEX { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.35); }
+    /* Classic ESPN FantasyCast Header & Metallic Bars */
+    .fc-green-header {
+      background: linear-gradient(180deg, #24ab44 0%, #168d32 52%, #0c6921 100%);
+      border-top: 1px solid #48d368;
+      border-bottom: 2px solid #042e0c;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
+    }
+
+    .fc-subnav-bar {
+      background: linear-gradient(180deg, #1e2024 0%, #0f1012 100%);
+      border-bottom: 1px solid #33373d;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+    }
+
+    .fc-tab-active {
+      background: linear-gradient(180deg, #32bd4f 0%, #198c32 55%, #116823 100%);
+      color: #ffffff;
+      border: 1px solid #4fe06d;
+      border-bottom: none;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    }
+
+    .fc-tab-inactive {
+      background: linear-gradient(180deg, #43474d 0%, #26292e 50%, #181a1d 100%);
+      color: #d5dce2;
+      border: 1px solid #52575f;
+      border-bottom: none;
+      text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
+    }
+    .fc-tab-inactive:hover {
+      background: linear-gradient(180deg, #52575e 0%, #30343a 50%, #202327 100%);
+      color: #ffffff;
+    }
+
+    .fc-black-pill {
+      background: linear-gradient(180deg, #33363b 0%, #16181b 55%, #0c0d0f 100%);
+      border: 1px solid #063812;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(0, 0, 0, 0.6);
+      color: #ffffff;
+    }
+
+    .fc-metal-card {
+      background: linear-gradient(180deg, #35383e 0%, #22252a 45%, #17191c 55%, #121417 100%);
+      border-top: 1px solid #545961;
+      border-left: 1px solid #3a3e45;
+      border-right: 1px solid #101214;
+      border-bottom: 2px solid #070809;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.65);
+    }
+    .fc-metal-card:hover {
+      background: linear-gradient(180deg, #3f434a 0%, #282c32 45%, #1c1f23 55%, #15181b 100%);
+    }
+
+    .fc-metal-card-selected {
+      background: linear-gradient(180deg, #274f24 0%, #193817 48%, #11280f 100%);
+      border-top: 1px solid #55d46b;
+      border-left: 3px solid #e8c500;
+      border-right: 1px solid #235c1e;
+      border-bottom: 2px solid #071706;
+      box-shadow: 0 0 12px rgba(46, 204, 113, 0.28), 0 2px 6px rgba(0, 0, 0, 0.75);
+    }
+
+    .fc-inset-box {
+      background: linear-gradient(180deg, #0d0f11 0%, #16181c 100%);
+      border-top: 1px solid #060708;
+      border-left: 1px solid #08090b;
+      border-right: 1px solid #2c3036;
+      border-bottom: 1px solid #353a42;
+    }
+
+    .fc-turf-panel {
+      background: linear-gradient(180deg, rgba(24, 71, 17, 0.94) 0%, rgba(14, 45, 10, 0.96) 100%);
+      border: 1px solid #2e6e23;
+      box-shadow: inset 0 1px 0 rgba(114, 230, 128, 0.2), 0 4px 14px rgba(0, 0, 0, 0.65);
+    }
+
+    .fc-player-row {
+      background: linear-gradient(180deg, #2b2e33 0%, #1d1f23 50%, #15171a 100%);
+      border-top: 1px solid #40454d;
+      border-bottom: 1px solid #0a0b0d;
+      border-left: 1px solid #2d3137;
+      border-right: 1px solid #0d0f12;
+    }
+
+    .fc-pos-box {
+      background: linear-gradient(180deg, #32363c 0%, #1d2024 52%, #131518 100%);
+      border-top: 1px solid #4c515a;
+      border-bottom: 1px solid #090a0c;
+      border-left: 1px solid #34383f;
+      border-right: 1px solid #0d0f12;
+      color: #e2e8f0;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+    }
+
+    /* Classic ESPN Position Badges */
+    .pos-QB, .pos-RB, .pos-WR, .pos-TE, .pos-FLEX, .pos-SUPER_FLEX, .pos-DL, .pos-DE, .pos-DT, .pos-LB, .pos-DB, .pos-CB, .pos-S, .pos-IDP_FLEX {
+      background: linear-gradient(180deg, #32363c 0%, #1b1e22 55%, #121417 100%);
+      color: #f1f5f9;
+      border-top: 1px solid #50565f;
+      border-bottom: 1px solid #090a0c;
+      border-left: 1px solid #363b42;
+      border-right: 1px solid #101214;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+    }
+
+    /* Global overrides so Optimizer / ROS / Model cards also match the ESPN FantasyCast palette */
+    .bg-\[\#171c28\] {
+      background: linear-gradient(180deg, #25282d 0%, #17191d 100%) !important;
+      border-color: #3a3f47 !important;
+    }
+    .bg-\[\#121723\] {
+      background: #111316 !important;
+      border-color: #2e333a !important;
+    }
+    .text-\[\#00ceb8\] {
+      color: #4ee468 !important;
+    }
+    .bg-\[\#00ceb8\] {
+      background: linear-gradient(180deg, #32bd4f 0%, #17822e 100%) !important;
+      color: #ffffff !important;
+    }
+    .border-\[\#00ceb8\] {
+      border-color: #4ee468 !important;
+    }
 
     @keyframes pulseGlow {
       0%, 100% { opacity: 1; }
-      50% { opacity: 0.45; }
+      50% { opacity: 0.4; }
     }
     .live-dot {
-      animation: pulseGlow 1.6s infinite ease-in-out;
+      animation: pulseGlow 1.5s infinite ease-in-out;
     }
 
     @keyframes scoreFlash {
-      0% { background-color: rgba(0, 206, 184, 0.35); }
-      100% { background-color: transparent; }
+      0% { background: rgba(232, 197, 0, 0.45); }
+      100% { background: transparent; }
     }
     .score-updated {
       animation: scoreFlash 1.8s ease-out;
     }
 
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #0f131c; }
-    ::-webkit-scrollbar-thumb { background: #2b354b; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #3e4c6b; }
+    ::-webkit-scrollbar { width: 7px; height: 7px; }
+    ::-webkit-scrollbar-track { background: #0d120c; }
+    ::-webkit-scrollbar-thumb { background: #2d4a28; border-radius: 2px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3f6b38; }
   </style>
 </head>
-<body class="min-h-screen flex flex-col selection:bg-[#00ceb8]/30 selection:text-[#00ceb8]">
+<body class="min-h-screen flex flex-col selection:bg-[#e8c500]/30 selection:text-[#e8c500]">
 
-  <!-- TOP HEADER BAR -->
-  <header class="sticky top-0 z-30 bg-[#131824]/95 backdrop-blur-md border-b border-[#263044] px-4 py-3">
+  <!-- CLASSIC ESPN FANTASYCAST GREEN BANNER HEADER -->
+  <header class="sticky top-0 z-30 fc-green-header px-3 sm:px-5 py-2">
     <div class="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-3">
-      <!-- League Identity -->
+      <!-- Left: Classic FANTASY Shield Crest + FANTASYCAST FOOTBALL Title -->
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-[#00ceb8] to-[#3b82f6] p-0.5 shadow-lg shadow-[#00ceb8]/10">
-          <div class="w-full h-full bg-[#131824] rounded-[10px] flex items-center justify-center font-extrabold text-sm text-[#00ceb8]">
-            FF
-          </div>
+        <!-- Classic ESPN Fantasy Football Crest SVG -->
+        <div class="w-12 h-12 shrink-0 flex items-center justify-center drop-shadow-[0_2px_4px_rgba(0,0,0,0.65)]">
+          <svg viewBox="0 0 64 64" class="w-12 h-12">
+            <defs>
+              <linearGradient id="shieldMetal" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#ffffff"/>
+                <stop offset="50%" stop-color="#cbd5e1"/>
+                <stop offset="100%" stop-color="#64748b"/>
+              </linearGradient>
+              <linearGradient id="shieldGreen" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#0d521c"/>
+                <stop offset="100%" stop-color="#05260b"/>
+              </linearGradient>
+            </defs>
+            <!-- Outer Shield -->
+            <path d="M8 10 L32 4 L56 10 L52 40 C50 51 32 59 32 59 C32 59 14 51 12 40 Z" fill="url(#shieldMetal)" stroke="#041f09" stroke-width="2"/>
+            <path d="M11 12.5 L32 7 L53 12.5 L49.5 39 C47.8 48.5 32 55.5 32 55.5 C32 55.5 16.2 48.5 14.5 39 Z" fill="url(#shieldGreen)" stroke="#1fa33c" stroke-width="1.2"/>
+            <!-- FANTASY Banner Text -->
+            <text x="32" y="21" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-weight="900" font-size="7.5" letter-spacing="0.8">FANTASY</text>
+            <!-- Football Icon -->
+            <ellipse cx="32" cy="36" rx="13" ry="8.2" fill="#e2e8f0" stroke="#041f09" stroke-width="1.5"/>
+            <path d="M22 36 L42 36 M26 33 L26 39 M30 33 L30 39 M34 33 L34 39 M38 33 L38 39" stroke="#093814" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
         </div>
         <div>
-          <div class="flex items-center gap-2 flex-wrap">
-            <h1 id="league-name" class="text-base sm:text-lg font-bold tracking-tight text-white">Fantasy Fortèball</h1>
-            <span id="season-badge" class="px-2 py-0.5 text-xs font-semibold rounded-full bg-[#00ceb8]/15 text-[#00ceb8] border border-[#00ceb8]/30">
-              2026 • Median Match
+          <div class="flex items-baseline gap-2.5 flex-wrap">
+            <h1 class="fc-banner-title text-2xl sm:text-3xl font-bold text-white leading-none">
+              FANTASYCAST FOOTBALL
+            </h1>
+            <span id="season-badge" class="px-2 py-0.5 text-[11px] font-bold rounded bg-[#073b12] text-[#86efac] border border-[#2ec94e]/50 font-mono-num">
+              2026 • Week 9
             </span>
           </div>
-          <p class="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
-            <span>League ID: <code id="league-id-display" class="text-slate-300 font-mono-num">1312258310212165632</code></span>
-            <span>•</span>
-            <span class="text-emerald-400 flex items-center gap-1">
-              <span class="w-2 h-2 rounded-full bg-emerald-400 live-dot"></span>
-              Auto-Syncs Weeks & Lineups (10k MC)
-            </span>
+          <p class="text-xs text-[#dcfae2] font-semibold mt-0.5 flex items-center gap-1.5 flex-wrap drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]">
+            <span id="league-name" class="font-bold text-white">Fantasy Fortèball</span>
+            <span>|</span>
+            <span class="text-[#fff380] font-bold">Hoon Lounge Hooners</span>
+            <span class="opacity-75">•</span>
+            <span class="text-[11px] opacity-90">ID: <code id="league-id-display" class="font-mono-num">1312258310212165632</code></span>
           </p>
         </div>
       </div>
 
-      <!-- Main Navigation Tabs -->
-      <div class="flex items-center bg-[#1a2130] p-1 rounded-xl border border-[#2b354b] flex-wrap">
-        <button onclick="switchTab('matchups')" id="tab-btn-matchups" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[#00ceb8] text-slate-950 shadow">
-          Live Matchups
-        </button>
-        <button onclick="switchTab('optimizer')" id="tab-btn-optimizer" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white flex items-center gap-1.5">
-          <span>🎯 Lineup Optimizer</span>
-          <span id="optimizer-nav-badge" class="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30 font-mono-num text-[10px]">PROPS+MC</span>
-        </button>
-        <button onclick="switchTab('ros')" id="tab-btn-ros" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white flex items-center gap-1.5">
-          <span>🔮 Rest of Season</span>
-          <span id="ros-nav-badge" class="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 font-mono-num text-[10px]">W8–W17</span>
-        </button>
-        <button onclick="switchTab('median')" id="tab-btn-median" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white">
-          Median Forecast & Race
-        </button>
-        <button onclick="switchTab('activity')" id="tab-btn-activity" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white flex items-center gap-1.5">
-          <span>Lineup & Score Log</span>
-          <span id="activity-count-badge" class="px-1.5 py-0.2 rounded-full bg-[#2b354b] text-slate-300 font-mono-num text-xs">0</span>
-        </button>
-        <button onclick="switchTab('model')" id="tab-btn-model" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white">
-          Model Info
-        </button>
-        <a href="./optimizer.html" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all bg-gradient-to-r from-sky-500/25 to-indigo-500/25 text-sky-300 border border-sky-400/40 hover:text-white flex items-center gap-1.5 ml-1">
-          <span>🚀 Standalone Optimizer + ROS App ↗</span>
-        </a>
-      </div>
-
-      <!-- Controls: Dynamic Week Selector, Smart Auto-Sub Toggle, Sleeper Deltas, Live Sync -->
-      <div class="flex items-center gap-2 flex-wrap">
-        <div class="flex items-center gap-1.5 bg-[#1a2130] px-2.5 py-1.5 rounded-xl border border-[#2b354b]">
-          <label for="week-select" class="text-xs text-slate-400 font-medium">Week</label>
-          <select id="week-select" onchange="onWeekChange()" class="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer">
-            <!-- Dynamically populated from Sleeper NFL State (Weeks 1-18) -->
-          </select>
+      <!-- Right Controls: Classic ESPN Glossy Black Dropdowns & Sync -->
+      <div class="flex flex-col items-end gap-1.5">
+        <div class="flex items-center gap-3 text-[11px] text-[#e2fce6]">
+          <span class="flex items-center gap-1 font-semibold">
+            <span id="poll-indicator" class="w-2 h-2 rounded-full bg-[#ffe600] live-dot"></span>
+            Live 10k MC Auto-Sync (<span id="countdown-label" class="font-mono-num">10s</span>)
+          </span>
+          <button onclick="fetchLiveState(true)" class="underline hover:text-white font-bold">Refresh Now</button>
+          <a href="./optimizer.html" class="underline hover:text-[#ffe600] font-bold">Standalone Optimizer ↗</a>
         </div>
 
-        <button onclick="toggleAutoSubMode()" id="autosub-toggle-btn"
-                title="Automatically substitute BYE or OUT starters with highest-projected eligible bench players for future weeks"
-                class="px-3 py-1.5 rounded-xl text-xs font-semibold border border-[#2b354b] bg-[#1a2130] text-slate-300 hover:border-amber-400/50 transition flex items-center gap-1.5">
-          <span>⚡ Auto-Sub BYE/OUT:</span>
-          <span id="autosub-state-label" class="font-bold text-slate-400">OFF</span>
-        </button>
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <div class="fc-black-pill px-2.5 py-1 rounded flex items-center gap-1.5 text-xs">
+            <label for="week-select" class="text-[#9ae6b4] font-bold uppercase text-[10px]">Week:</label>
+            <select id="week-select" onchange="onWeekChange()" class="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer">
+            </select>
+          </div>
 
-        <button onclick="toggleComparisonMode()" id="compare-toggle-btn" class="px-3 py-1.5 rounded-xl text-xs font-semibold border border-[#3b82f6]/40 bg-[#3b82f6]/15 text-[#60a5fa] hover:bg-[#3b82f6]/25 transition flex items-center gap-1.5">
-          <span>Sleeper Deltas:</span>
-          <span id="compare-state-label" class="font-bold text-white">ON</span>
-        </button>
+          <button onclick="toggleAutoSubMode()" id="autosub-toggle-btn"
+                  title="Automatically substitute BYE or OUT starters with highest-projected eligible bench players for future weeks"
+                  class="fc-black-pill px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1">
+            <span>⚡ Auto-Sub:</span>
+            <span id="autosub-state-label" class="font-bold text-[#94a3b8]">OFF</span>
+          </button>
 
-        <div class="flex items-center gap-2 bg-[#1a2130] px-3 py-1.5 rounded-xl border border-[#2b354b]">
-          <span id="poll-indicator" class="w-2 h-2 rounded-full bg-[#00ceb8] live-dot"></span>
-          <span id="countdown-label" class="text-xs text-slate-300 font-mono-num">10s</span>
-          <button onclick="fetchLiveState(true)" class="text-xs font-semibold text-[#00ceb8] hover:underline ml-1">
-            Sync
+          <button onclick="toggleComparisonMode()" id="compare-toggle-btn"
+                  class="fc-black-pill px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1">
+            <span>vs Sleeper:</span>
+            <span id="compare-state-label" class="font-bold text-[#ffe600]">ON</span>
           </button>
         </div>
       </div>
     </div>
   </header>
 
+  <!-- CLASSIC ESPN FANTASYCAST SUB-NAVIGATION BAR & GAME KEY -->
+  <div class="fc-subnav-bar px-3 sm:px-5 pt-1.5">
+    <div class="max-w-[1600px] mx-auto flex flex-wrap items-end justify-between gap-2">
+      <!-- Left: GAME KEY -->
+      <div class="flex items-center gap-3 text-[11px] font-bold tracking-wide text-[#cbd5e1] pb-1.5">
+        <span class="text-white uppercase">GAME KEY:</span>
+        <span class="flex items-center gap-1">
+          <span class="inline-block w-3 h-2.5 bg-[#e8c500] border border-black shadow-inner"></span>
+          <span class="text-[#d1d5db]">MY TEAM / TOP-5 MEDIAN</span>
+        </span>
+        <span class="flex items-center gap-1">
+          <span class="inline-block w-3 h-2.5 bg-[#737b84] border border-black shadow-inner"></span>
+          <span class="text-[#9ca3af]">OPPONENT / CHASING</span>
+        </span>
+        <span class="hidden xl:inline text-[#9ae6b4] ml-2 uppercase">SELECT A MATCHUP TO WATCH</span>
+      </div>
+
+      <!-- Center/Right: Classic Beveled Folder Tabs -->
+      <div class="flex items-end gap-1 flex-wrap">
+        <button onclick="switchTab('matchups')" id="tab-btn-matchups" class="fc-tab-active px-3.5 py-1.5 rounded-t text-xs font-extrabold uppercase tracking-wider flex items-center gap-1">
+          <span>MATCHUP ▾</span>
+        </button>
+        <button onclick="switchTab('median')" id="tab-btn-median" class="fc-tab-inactive px-3.5 py-1.5 rounded-t text-xs font-extrabold uppercase tracking-wider flex items-center gap-1">
+          <span>LEAGUE MEDIAN BOARD</span>
+        </button>
+        <button onclick="switchTab('optimizer')" id="tab-btn-optimizer" class="fc-tab-inactive px-3.5 py-1.5 rounded-t text-xs font-extrabold uppercase tracking-wider flex items-center gap-1.5">
+          <span>LINEUP OPTIMIZER</span>
+          <span id="optimizer-nav-badge" class="px-1 py-0.2 rounded bg-black/50 text-[#ffe600] font-mono-num text-[10px]">PROPS</span>
+        </button>
+        <button onclick="switchTab('ros')" id="tab-btn-ros" class="fc-tab-inactive px-3.5 py-1.5 rounded-t text-xs font-extrabold uppercase tracking-wider flex items-center gap-1.5">
+          <span>REST OF SEASON</span>
+          <span id="ros-nav-badge" class="px-1 py-0.2 rounded bg-black/50 text-[#4ee468] font-mono-num text-[10px]">W1–17</span>
+        </button>
+        <button onclick="switchTab('activity')" id="tab-btn-activity" class="fc-tab-inactive px-3 py-1.5 rounded-t text-xs font-extrabold uppercase tracking-wider flex items-center gap-1">
+          <span>SCORE LOG</span>
+          <span id="activity-count-badge" class="px-1 rounded bg-black/60 text-white font-mono-num text-[10px]">0</span>
+        </button>
+        <button onclick="switchTab('model')" id="tab-btn-model" class="fc-tab-inactive px-3 py-1.5 rounded-t text-xs font-extrabold uppercase tracking-wider">
+          <span>MODEL</span>
+        </button>
+      </div>
+
+      <!-- Far Right: Classic NFL PLAYERS Badge -->
+      <div class="hidden md:flex items-center gap-1.5 pb-1.5 text-[10px] text-[#9ca3af]">
+        <span>Live Correlated MC</span>
+        <span class="px-1.5 py-0.5 rounded-sm bg-[#d91b1b] text-white font-black tracking-wider uppercase shadow">NFL PLAYERS</span>
+      </div>
+    </div>
+  </div>
+
   <!-- LIVE NFL SCOREBOARD STRIP -->
-  <div class="bg-[#141924] border-b border-[#232c3d] px-4 py-2 overflow-x-auto">
-    <div id="nfl-ticker" class="max-w-[1600px] mx-auto flex items-center gap-2.5 min-w-max">
+  <div class="bg-[#0e1012] border-b border-[#2a2e34] px-3 sm:px-5 py-1.5 overflow-x-auto">
+    <div id="nfl-ticker" class="max-w-[1600px] mx-auto flex items-center gap-2 min-w-max">
       <span class="text-xs text-slate-400">Syncing live NFL game clocks & lineups from Sleeper...</span>
     </div>
   </div>
 
-  <!-- TOP SUMMARY BANNER: IMPROVED MEDIAN FORECAST VS SLEEPER -->
-  <section class="max-w-[1600px] w-full mx-auto px-4 pt-4">
-    <div class="bg-gradient-to-r from-[#192132] via-[#1d2538] to-[#192132] border border-[#2d3850] rounded-2xl p-4 shadow-xl">
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
+  <!-- TOP SUMMARY BANNER: ESPN FANTASYCAST MEDIAN CUTOFF SCOREBOARD -->
+  <section class="max-w-[1600px] w-full mx-auto px-3 sm:px-5 pt-3">
+    <div class="fc-metal-card rounded p-3">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-center">
         <!-- Left: True Expected Median vs Sleeper Static Median -->
-        <div class="lg:col-span-5 flex flex-wrap sm:flex-nowrap items-center gap-4 border-b lg:border-b-0 lg:border-r border-[#2d3850] pb-3 lg:pb-0 lg:pr-4">
-          <div class="bg-[#121723] border border-[#00ceb8]/35 rounded-xl px-4 py-2.5 flex-1 min-w-[180px]">
+        <div class="lg:col-span-5 flex flex-wrap sm:flex-nowrap items-center gap-2.5 border-b lg:border-b-0 lg:border-r border-[#3a3f47] pb-2.5 lg:pb-0 lg:pr-3">
+          <div class="fc-inset-box rounded px-3.5 py-2 flex-1 min-w-[175px] border-l-4 !border-l-[#e8c500]">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-semibold uppercase tracking-wider text-[#00ceb8]">Improved Expected Median</span>
-              <span class="text-xs px-1.5 py-0.5 rounded bg-[#00ceb8]/15 text-[#00ceb8] font-mono-num">MC Joint</span>
+              <span class="text-[11px] font-extrabold uppercase tracking-wider text-[#e8c500]">True Top-5 Median Cutoff</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-[#184711] text-[#86efac] border border-[#2e8522] font-bold">10K MC</span>
             </div>
-            <div class="flex items-baseline gap-2 mt-1">
-              <span id="banner-imp-median" class="text-2xl sm:text-3xl font-extrabold font-mono-num text-white">--</span>
-              <span id="banner-med-delta" class="text-xs font-bold font-mono-num px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">--</span>
+            <div class="flex items-baseline gap-2 mt-0.5">
+              <span id="banner-imp-median" class="text-2xl sm:text-3xl font-black font-mono-num text-white">--</span>
+              <span id="banner-med-delta" class="text-[11px] font-bold font-mono-num px-1.5 py-0.5 rounded bg-[#e8c500]/20 text-[#ffe600]">--</span>
             </div>
-            <p id="banner-med-ci" class="text-xs text-slate-400 mt-0.5 font-mono-num">80% CI: -- to --</p>
+            <p id="banner-med-ci" class="text-[11px] text-[#9ca3af] mt-0.5 font-mono-num">80% CI: -- to --</p>
           </div>
 
-          <div class="bg-[#121723]/70 border border-[#2b354b] rounded-xl px-4 py-2.5 flex-1 min-w-[165px]">
+          <div class="fc-inset-box rounded px-3.5 py-2 flex-1 min-w-[160px]">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Sleeper Static Median</span>
-              <span class="text-xs px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-300">Naive #5/#6 Avg</span>
+              <span class="text-[11px] font-bold uppercase tracking-wider text-[#9ca3af]">Sleeper Static Median</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-[#25282e] text-[#cbd5e1]">#5/#6 Avg</span>
             </div>
-            <div class="flex items-baseline gap-2 mt-1">
-              <span id="banner-slp-median" class="text-2xl sm:text-3xl font-bold font-mono-num text-slate-300">--</span>
+            <div class="flex items-baseline gap-2 mt-0.5">
+              <span id="banner-slp-median" class="text-2xl sm:text-3xl font-bold font-mono-num text-[#cbd5e1]">--</span>
             </div>
-            <p class="text-xs text-slate-400 mt-0.5">Ignores order-statistic skew</p>
+            <p class="text-[11px] text-[#7f8790] mt-0.5">Naive static average</p>
           </div>
         </div>
 
         <!-- Middle: Why Median Differs Right Now -->
-        <div class="lg:col-span-4 border-b lg:border-b-0 lg:border-r border-[#2d3850] pb-3 lg:pb-0 lg:pr-4">
-          <div class="flex items-center gap-1.5 text-xs font-semibold text-amber-300 mb-1">
-            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            <span>Live Median Cutoff Insight (#5 vs #6 Bubble)</span>
+        <div class="lg:col-span-4 border-b lg:border-b-0 lg:border-r border-[#3a3f47] pb-2.5 lg:pb-0 lg:pr-3">
+          <div class="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-[#4ee468] mb-1">
+            <span>🏈 FantasyCast Median Bubble Report (#5 vs #6)</span>
           </div>
-          <p id="banner-insight-text" class="text-xs text-slate-300 leading-relaxed">
+          <p id="banner-insight-text" class="text-xs text-[#d1d5db] leading-relaxed">
             Calculating joint order statistics across all 10 rosters...
           </p>
         </div>
 
         <!-- Right: Bubble Race Mini-Pills (#4, #5, #6, #7) -->
         <div class="lg:col-span-3">
-          <div class="flex items-center justify-between text-xs text-slate-400 mb-1.5">
-            <span class="font-semibold text-slate-300">Live Median Bubble (#4 – #7)</span>
-            <button onclick="switchTab('median')" class="text-[#00ceb8] hover:underline font-medium">Full Table →</button>
+          <div class="flex items-center justify-between text-[11px] text-[#9ca3af] mb-1">
+            <span class="font-extrabold uppercase text-white">Median Bubble (#4 – #7)</span>
+            <button onclick="switchTab('median')" class="text-[#ffe600] hover:underline font-bold">Full Standings →</button>
           </div>
           <div id="banner-bubble-list" class="space-y-1"></div>
         </div>
@@ -218,113 +388,113 @@
   </section>
 
   <!-- MAIN CONTENT AREA -->
-  <main class="max-w-[1600px] w-full mx-auto px-4 py-4 flex-1">
+  <main class="max-w-[1600px] w-full mx-auto px-3 sm:px-5 py-3 flex-1">
 
-    <!-- TAB 1: LIVE MATCHUPS (SLEEPER-STYLE MASTER-DETAIL) -->
-    <div id="tab-content-matchups" class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-      <!-- Left Column: All 5 Matchup Cards -->
-      <div class="lg:col-span-5 space-y-3">
-        <div class="flex items-center justify-between px-1">
-          <h2 id="matchups-col-heading" class="text-sm font-bold uppercase tracking-wider text-slate-300">Week Matchups</h2>
-          <span class="text-xs text-slate-400">Click any matchup for full lineup & bench</span>
+    <!-- TAB 1: LIVE MATCHUPS (CLASSIC ESPN FANTASYCAST SPLIT VIEW) -->
+    <div id="tab-content-matchups" class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+      <!-- Left Column: Metallic Charcoal Scoreboard & Matchup Selector (5 cols) -->
+      <div class="lg:col-span-5 bg-[#0c0e10] border-2 border-[#2a2e33] rounded p-2.5 shadow-2xl space-y-2">
+        <div class="flex items-center justify-between px-1 pb-1 border-b border-[#26292e]">
+          <h2 id="matchups-col-heading" class="text-xs font-extrabold uppercase tracking-wider text-[#e2e8f0]">LEAGUE SCOREBOARD</h2>
+          <span class="text-[11px] text-[#9ae6b4] font-semibold">Select a matchup to watch</span>
         </div>
-        <div id="matchups-list" class="space-y-3"></div>
+        <div id="matchups-list" class="space-y-2"></div>
       </div>
 
-      <!-- Right Column: Selected Matchup Head-to-Head Lineup Detail -->
-      <div class="lg:col-span-7 bg-[#171c28] border border-[#2b354b] rounded-2xl overflow-hidden shadow-2xl">
+      <!-- Right Column: Selected Matchup Head-to-Head Turf Field Board (7 cols) -->
+      <div class="lg:col-span-7 fc-turf-panel rounded overflow-hidden">
         <div id="selected-matchup-detail">
-          <div class="p-8 text-center text-slate-400 text-sm">Loading matchup details...</div>
+          <div class="p-8 text-center text-[#bbf7d0] text-sm font-bold">Loading FantasyCast Matchup Board...</div>
         </div>
       </div>
     </div>
 
     <!-- TAB 2: LEAGUE MEDIAN FORECAST & 10-TEAM RACE -->
-    <div id="tab-content-median" class="hidden space-y-5">
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        <div class="lg:col-span-8 bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl">
-          <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+    <div id="tab-content-median" class="hidden space-y-4">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div class="lg:col-span-8 fc-turf-panel rounded p-4 shadow-xl">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-2 border-b border-[#2e6e23]">
             <div>
-              <h2 class="text-base font-bold text-white">Live League Median Race (Top 5 Earn Extra Win)</h2>
-              <p class="text-xs text-slate-400 mt-0.5">
-                Sorted by Improved Live Projection. Shows 10th–90th percentile score range, true Median Win %, and Expected Weekly Wins (H2H + Median).
+              <h2 class="text-base font-extrabold uppercase tracking-wide text-white">Live League Median Scoreboard (Top 5 Earn Extra Win)</h2>
+              <p class="text-xs text-[#bbf7d0] mt-0.5">
+                Sorted by Improved Live Projection. Yellow highlight indicates teams currently above the Top-5 Median Cutoff.
               </p>
             </div>
             <div class="flex items-center gap-2 text-xs">
-              <span class="px-2.5 py-1 rounded-lg bg-[#00ceb8]/15 text-[#00ceb8] border border-[#00ceb8]/30 font-mono-num font-semibold">
+              <span class="px-2.5 py-1 rounded bg-[#0c2608] text-[#ffe600] border border-[#e8c500]/60 font-mono-num font-bold">
                 Target Median: <span id="table-target-median">--</span>
               </span>
             </div>
           </div>
 
-          <div class="overflow-x-auto">
+          <div class="overflow-x-auto bg-[#111417]/95 border border-[#3a3f47] rounded">
             <table class="w-full text-left border-collapse">
               <thead>
-                <tr class="border-b border-[#2b354b] text-xs text-slate-400 uppercase">
-                  <th class="py-2.5 px-2">Rank</th>
-                  <th class="py-2.5 px-2">Team</th>
-                  <th class="py-2.5 px-2 text-right">Current</th>
-                  <th class="py-2.5 px-2 text-right">Improved Proj</th>
-                  <th class="py-2.5 px-2 text-right">vs Sleeper</th>
-                  <th class="py-2.5 px-3 text-center">Simulated Range (10th–90th)</th>
-                  <th class="py-2.5 px-2 text-right">Median Win %</th>
-                  <th class="py-2.5 px-2 text-right">H2H Win %</th>
-                  <th class="py-2.5 px-2 text-center">2-0 / 1-1 / 0-2</th>
+                <tr class="fc-metal-card text-[11px] text-[#cbd5e1] uppercase font-extrabold">
+                  <th class="py-2 px-2">Rank</th>
+                  <th class="py-2 px-2">Team</th>
+                  <th class="py-2 px-2 text-right">Current</th>
+                  <th class="py-2 px-2 text-right">Proj</th>
+                  <th class="py-2 px-2 text-right">vs Sleeper</th>
+                  <th class="py-2 px-3 text-center">Simulated Range (10th–90th)</th>
+                  <th class="py-2 px-2 text-right">Median Win %</th>
+                  <th class="py-2 px-2 text-right">H2H Win %</th>
+                  <th class="py-2 px-2 text-center">2-0 / 1-1 / 0-2</th>
                 </tr>
               </thead>
-              <tbody id="median-leaderboard-tbody" class="divide-y divide-[#232c3f] text-sm"></tbody>
+              <tbody id="median-leaderboard-tbody" class="divide-y divide-[#25292e] text-sm"></tbody>
             </table>
           </div>
         </div>
 
-        <div class="lg:col-span-4 space-y-5">
-          <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl">
-            <h3 class="text-sm font-bold text-white uppercase tracking-wider mb-1">
+        <div class="lg:col-span-4 space-y-4">
+          <div class="fc-metal-card rounded p-4 shadow-xl">
+            <h3 class="text-xs font-extrabold text-[#ffe600] uppercase tracking-wider mb-1">
               Simulated League Median Distribution
             </h3>
-            <p class="text-xs text-slate-400 mb-4">
+            <p class="text-xs text-[#9ca3af] mb-3">
               Probability density of the 5th/6th cutoff score across 10,000 correlated simulations.
             </p>
-            <div id="median-histogram-chart" class="h-48 flex items-end gap-1 pt-6 pb-2 px-1 border-b border-[#2b354b]"></div>
-            <div class="flex justify-between text-xs font-mono-num text-slate-400 mt-2">
+            <div id="median-histogram-chart" class="h-48 flex items-end gap-1 pt-6 pb-2 px-2 fc-inset-box rounded"></div>
+            <div class="flex justify-between text-xs font-mono-num text-[#9ca3af] mt-2">
               <span id="hist-min-label">--</span>
-              <span class="text-[#00ceb8] font-semibold">Expected: <span id="hist-mean-label">--</span></span>
+              <span class="text-[#4ee468] font-bold">Expected: <span id="hist-mean-label">--</span></span>
               <span id="hist-max-label">--</span>
             </div>
 
-            <div class="mt-4 pt-3 border-t border-[#2b354b] space-y-2 text-xs">
+            <div class="mt-3 pt-3 border-t border-[#363b42] space-y-1.5 text-xs">
               <div class="flex justify-between">
-                <span class="text-slate-400">Sleeper Static Median (5th/6th Avg):</span>
-                <span id="diag-slp-med" class="font-mono-num font-semibold text-slate-200">--</span>
+                <span class="text-[#9ca3af]">Sleeper Static Median (5th/6th Avg):</span>
+                <span id="diag-slp-med" class="font-mono-num font-bold text-slate-200">--</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-slate-400">Improved Static Median (5th/6th Avg):</span>
-                <span id="diag-imp-static-med" class="font-mono-num font-semibold text-slate-200">--</span>
+                <span class="text-[#9ca3af]">Improved Static Median (5th/6th Avg):</span>
+                <span id="diag-imp-static-med" class="font-mono-num font-bold text-slate-200">--</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-[#00ceb8] font-medium">True Expected Median E[0.5*(S₅+S₆)]:</span>
-                <span id="diag-imp-mc-med" class="font-mono-num font-bold text-[#00ceb8]">--</span>
+                <span class="text-[#4ee468] font-bold">True Expected Median E[0.5*(S₅+S₆)]:</span>
+                <span id="diag-imp-mc-med" class="font-mono-num font-extrabold text-[#4ee468]">--</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-slate-400">Interquartile Range (25th – 75th):</span>
+                <span class="text-[#9ca3af]">Interquartile Range (25th – 75th):</span>
                 <span id="diag-med-iqr" class="font-mono-num text-slate-300">--</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-slate-400">80% Confidence Interval (10th – 90th):</span>
+                <span class="text-[#9ca3af]">80% Confidence Interval (10th – 90th):</span>
                 <span id="diag-med-ci80" class="font-mono-num text-slate-300">--</span>
               </div>
             </div>
           </div>
 
-          <div class="bg-[#171c28] border border-[#2b354b] rounded-2xl p-5 shadow-xl space-y-2.5">
-            <h3 class="text-sm font-bold text-amber-300 uppercase tracking-wider">
+          <div class="fc-metal-card rounded p-4 shadow-xl space-y-2">
+            <h3 class="text-xs font-extrabold text-[#ffe600] uppercase tracking-wider">
               Why Sleeper's Median Forecast Fails
             </h3>
-            <p class="text-xs text-slate-300 leading-relaxed">
+            <p class="text-xs text-[#d1d5db] leading-relaxed">
               Sleeper computes its projected median by taking the static point projections of the 10 teams, sorting them, and averaging #5 and #6.
             </p>
-            <p class="text-xs text-slate-300 leading-relaxed">
-              <strong>Order-Statistic Selection Bias:</strong> When the top 4 teams lock in high scores and 5–6 bubble teams are chasing the #5 spot with volatile players left to play, the eventual #5 score is the <em>maximum</em> of those chasing teams (<code class="text-[#00ceb8]">E[max(X₅..X₁₀)] &gt; max(E[X₅]..E[X₁₀])</code>).
+            <p class="text-xs text-[#d1d5db] leading-relaxed">
+              <strong>Order-Statistic Selection Bias:</strong> When the top 4 teams lock in high scores and 5–6 bubble teams are chasing the #5 spot with volatile players left to play, the eventual #5 score is the <em>maximum</em> of those chasing teams (<code class="text-[#4ee468]">E[max(X₅..X₁₀)] &gt; max(E[X₅]..E[X₁₀])</code>).
             </p>
           </div>
         </div>
@@ -507,10 +677,10 @@
         if (!content || !btn) return;
         if (t === tabName) {
           content.classList.remove('hidden');
-          btn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[#00ceb8] text-slate-950 shadow flex items-center gap-1.5';
+          btn.className = 'fc-tab-active px-3.5 py-1.5 rounded-t text-xs font-extrabold uppercase tracking-wider flex items-center gap-1.5';
         } else {
           content.classList.add('hidden');
-          btn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-300 hover:text-white flex items-center gap-1.5';
+          btn.className = 'fc-tab-inactive px-3.5 py-1.5 rounded-t text-xs font-extrabold uppercase tracking-wider flex items-center gap-1.5';
         }
       });
       if (tabName === 'optimizer' && currentState) {
@@ -524,13 +694,13 @@
       const btn = document.getElementById('autosub-toggle-btn');
       const lbl = document.getElementById('autosub-state-label');
       if (autoSubByeOut) {
-        btn.className = 'px-3 py-1.5 rounded-xl text-xs font-semibold border border-amber-400/60 bg-amber-500/20 text-amber-300 transition flex items-center gap-1.5';
+        btn.className = 'fc-black-pill px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 border !border-[#e8c500]';
         lbl.textContent = 'ON';
-        lbl.className = 'font-bold text-white';
+        lbl.className = 'font-bold text-[#ffe600]';
       } else {
-        btn.className = 'px-3 py-1.5 rounded-xl text-xs font-semibold border border-[#2b354b] bg-[#1a2130] text-slate-300 hover:border-amber-400/50 transition flex items-center gap-1.5';
+        btn.className = 'fc-black-pill px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1';
         lbl.textContent = 'OFF';
-        lbl.className = 'font-bold text-slate-400';
+        lbl.className = 'font-bold text-[#94a3b8]';
       }
     }
 
@@ -552,7 +722,7 @@
       for (let w = 1; w <= 18; w++) {
         const isLive = w === currentNflWeek;
         const label = isLive ? `${w} (Live)` : (w >= 14 ? `${w} (Playoffs)` : `${w}`);
-        weeks.push(`<option value="${w}" ${w === activeWeek ? 'selected' : ''}>${label}</option>`);
+        weeks.push(`<option value="${w}" class="bg-[#111316] text-white" ${w === activeWeek ? 'selected' : ''}>${label}</option>`);
       }
       sel.innerHTML = weeks.join('');
     }
@@ -629,7 +799,6 @@
         for (const t of [m.teamA, m.teamB]) {
           if (!t) continue;
           const rid = t.rosterId;
-          // 1. Check for starter swaps in Sleeper
           const rawStarterIds = (t.rawStarters || t.starters).map((p) => p.playerId);
           const prevIds = previousStartersByRoster[rid];
           if (prevIds && prevIds.length === rawStarterIds.length) {
@@ -647,7 +816,6 @@
           }
           previousStartersByRoster[rid] = rawStarterIds;
 
-          // 2. Check for live point changes
           const prevPts = previousScores[rid];
           if (prevPts !== undefined && Math.abs(t.currentPts - prevPts) >= 0.01) {
             const diff = t.currentPts - prevPts;
@@ -675,14 +843,14 @@
       container.innerHTML = activityLog.map((item) => {
         const isLineup = item.type === 'lineup';
         return `
-          <div class="flex items-center justify-between px-3 py-2 rounded-xl bg-[#121722] border ${isLineup ? 'border-amber-400/40' : 'border-[#263147]'} text-xs">
+          <div class="flex items-center justify-between px-3 py-2 rounded fc-metal-card text-xs">
             <div class="flex items-center gap-2">
-              <span class="px-1.5 py-0.5 rounded font-bold ${isLineup ? 'bg-amber-500/20 text-amber-300' : (item.diff > 0 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300')}">
+              <span class="px-1.5 py-0.5 rounded font-bold ${isLineup ? 'bg-[#e8c500]/20 text-[#ffe600]' : (item.diff > 0 ? 'bg-[#22a744]/30 text-[#4ee468]' : 'bg-rose-500/20 text-rose-300')}">
                 ${isLineup ? 'LINEUP SWAP' : formatSigned(item.diff)}
               </span>
               <span class="text-slate-200">${item.text}</span>
             </div>
-            <span class="text-slate-500 font-mono-num shrink-0 ml-2">${item.time}</span>
+            <span class="text-slate-400 font-mono-num shrink-0 ml-2">${item.time}</span>
           </div>
         `;
       }).join('');
@@ -701,39 +869,36 @@
       container.innerHTML = sorted.map((g) => {
         const isLive = g.status === 'in_game';
         const isPre = g.status === 'pre_game';
-        const borderCls = isLive
-          ? (g.redZone ? 'border-rose-500/60 bg-rose-950/25' : 'border-[#00ceb8]/50 bg-[#1a2436]')
-          : 'border-[#263044] bg-[#181f2e]/70';
 
         let statusBadge = '';
         if (isLive) {
-          statusBadge = `<span class="text-xs font-bold text-[#00ceb8] flex items-center gap-1">
-            <span class="w-1.5 h-1.5 rounded-full bg-[#00ceb8] live-dot"></span>
+          statusBadge = `<span class="text-[11px] font-bold text-[#4ee468] flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-[#4ee468] live-dot"></span>
             Q${g.quarter} ${g.clock}
           </span>`;
         } else if (isPre) {
-          statusBadge = `<span class="text-xs text-amber-300 font-medium">${g.clock}</span>`;
+          statusBadge = `<span class="text-[11px] text-[#cbd5e1] font-semibold">${g.clock}</span>`;
         } else {
-          statusBadge = `<span class="text-xs text-slate-400 font-medium">FINAL</span>`;
+          statusBadge = `<span class="text-[11px] text-[#9ca3af] font-bold">FINAL</span>`;
         }
 
         const rzBadge = g.redZone
-          ? `<span class="px-1.5 py-0.5 text-xs font-bold rounded bg-rose-500/25 text-rose-300 border border-rose-500/40">RZ: ${g.redZone}</span>`
+          ? `<span class="px-1 py-0.2 text-[10px] font-black rounded bg-[#d91b1b] text-white">RZ</span>`
           : '';
 
         const awayPoss = isLive && g.possession === g.awayTeam ? '🏈' : '';
         const homePoss = isLive && g.possession === g.homeTeam ? '🏈' : '';
 
         return `
-          <div class="px-3 py-1.5 rounded-xl border ${borderCls} flex items-center gap-3 text-xs shrink-0">
-            <div class="flex items-center gap-2 font-mono-num">
-              <span class="${g.possession === g.awayTeam ? 'text-white font-bold' : 'text-slate-300'}">${g.awayTeam}${awayPoss}</span>
-              ${!isPre ? `<span class="font-bold text-white">${g.awayScore}</span>` : ''}
-              <span class="text-slate-500">@</span>
-              <span class="${g.possession === g.homeTeam ? 'text-white font-bold' : 'text-slate-300'}">${g.homeTeam}${homePoss}</span>
-              ${!isPre ? `<span class="font-bold text-white">${g.homeScore}</span>` : ''}
+          <div class="px-2.5 py-1 rounded-sm fc-metal-card flex items-center gap-2.5 text-xs shrink-0 ${isLive ? 'border-l-2 !border-l-[#4ee468]' : ''}">
+            <div class="flex items-center gap-1.5 font-mono-num">
+              <span class="${g.possession === g.awayTeam ? 'text-[#ffe600] font-extrabold' : 'text-white font-bold'}">${g.awayTeam}${awayPoss}</span>
+              ${!isPre ? `<span class="font-extrabold text-[#ffe600]">${g.awayScore}</span>` : ''}
+              <span class="text-[#7f8790]">@</span>
+              <span class="${g.possession === g.homeTeam ? 'text-[#ffe600] font-extrabold' : 'text-white font-bold'}">${g.homeTeam}${homePoss}</span>
+              ${!isPre ? `<span class="font-extrabold text-[#ffe600]">${g.homeScore}</span>` : ''}
             </div>
-            <div class="border-l border-[#2d3850] pl-2 flex items-center gap-1.5">
+            <div class="border-l border-[#3a3f47] pl-2 flex items-center gap-1">
               ${statusBadge}
               ${rzBadge}
             </div>
@@ -751,8 +916,8 @@
       const diff = med.medianDiffVsSleeper;
       const deltaEl = document.getElementById('banner-med-delta');
       deltaEl.textContent = `${formatSigned(diff)} vs Sleeper`;
-      deltaEl.className = `text-xs font-bold font-mono-num px-1.5 py-0.5 rounded ${
-        Math.abs(diff) >= 1.5 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-[#00ceb8]/15 text-[#00ceb8]'
+      deltaEl.className = `text-[11px] font-bold font-mono-num px-1.5 py-0.5 rounded ${
+        Math.abs(diff) >= 1.5 ? 'bg-[#e8c500]/20 text-[#ffe600] border border-[#e8c500]/40' : 'bg-[#184711] text-[#86efac] border border-[#2e8522]'
       }`;
 
       document.getElementById('banner-med-ci').textContent =
@@ -766,12 +931,12 @@
         const t5MedWin = (t5.simulation.medianWinProbImproved * 100).toFixed(1);
         const t6MedWin = (t6.simulation.medianWinProbImproved * 100).toFixed(1);
         document.getElementById('banner-insight-text').innerHTML = `
-          Currently <strong>#5 ${t5.teamName}</strong> projects for <span class="font-mono-num text-white font-semibold">${t5.improvedTotalProj.toFixed(2)}</span>
-          and <strong>#6 ${t6.teamName}</strong> projects for <span class="font-mono-num text-white font-semibold">${t6.improvedTotalProj.toFixed(2)}</span>.
+          Currently <strong>#5 ${t5.teamName}</strong> projects for <span class="font-mono-num text-white font-bold">${t5.improvedTotalProj.toFixed(2)}</span>
+          and <strong>#6 ${t6.teamName}</strong> projects for <span class="font-mono-num text-white font-bold">${t6.improvedTotalProj.toFixed(2)}</span>.
           Sleeper averages #5 & #6 (<span class="font-mono-num">${med.staticMedianSleeper.toFixed(2)}</span>),
-          Whereas our 10,000-trial joint order-statistic simulation yields an expected Top-5 cutoff of
-          <strong class="text-[#00ceb8] font-mono-num">${med.expectedMedianImproved.toFixed(2)}</strong>—giving
-          <strong>${t5.teamName}</strong> a <strong class="text-amber-300 font-mono-num">${t5MedWin}%</strong> Median Win chance vs
+          while our 10,000-trial joint simulation yields an expected Top-5 cutoff of
+          <strong class="text-[#ffe600] font-mono-num">${med.expectedMedianImproved.toFixed(2)}</strong>—giving
+          <strong>${t5.teamName}</strong> a <strong class="text-[#4ee468] font-mono-num">${t5MedWin}%</strong> Median Win chance vs
           <strong class="font-mono-num">${t6MedWin}%</strong> for <strong>${t6.teamName}</strong>.
         `;
       }
@@ -780,23 +945,23 @@
       document.getElementById('banner-bubble-list').innerHTML = bubbleTeams.map((t) => {
         const isCutoff = t.rank === 5;
         return `
-          <div class="flex items-center justify-between text-xs px-2 py-1 rounded ${
-            t.rank <= 5 ? 'bg-emerald-950/30 border border-emerald-500/20' : 'bg-rose-950/20 border border-rose-500/15'
+          <div class="flex items-center justify-between text-xs px-2 py-1 rounded-sm fc-inset-box ${
+            t.rank <= 5 ? 'border-l-2 !border-l-[#4ee468]' : 'border-l-2 !border-l-[#737b84]'
           }">
             <div class="flex items-center gap-1.5 truncate pr-2">
-              <span class="font-mono-num font-bold ${t.rank <= 5 ? 'text-[#00ceb8]' : 'text-rose-400'}">#${t.rank}</span>
-              <span class="text-slate-200 font-medium truncate">${t.teamName}</span>
+              <span class="font-mono-num font-extrabold ${t.rank <= 5 ? 'text-[#4ee468]' : 'text-[#9ca3af]'}">#${t.rank}</span>
+              <span class="text-white font-bold truncate">${t.teamName}</span>
             </div>
             <div class="flex items-center gap-2 shrink-0 font-mono-num">
-              <span class="text-slate-300">${t.improvedTotalProj.toFixed(1)}</span>
-              <span class="px-1.5 py-0.5 rounded font-bold ${
+              <span class="text-[#cbd5e1] font-bold">${t.improvedTotalProj.toFixed(1)}</span>
+              <span class="px-1.5 py-0.2 rounded font-extrabold text-[11px] ${
                 t.simulation.medianWinProbImproved >= 0.5
-                  ? 'bg-[#00ceb8]/20 text-[#00ceb8]'
-                  : 'bg-slate-800 text-slate-300'
+                  ? 'bg-[#184711] text-[#86efac] border border-[#2e8522]'
+                  : 'bg-[#25282e] text-[#9ca3af]'
               }">${formatPct(t.simulation.medianWinProbImproved)}</span>
             </div>
           </div>
-          ${isCutoff ? '<div class="border-t border-dashed border-amber-400/50 my-0.5"></div>' : ''}
+          ${isCutoff ? '<div class="border-t border-dashed border-[#e8c500]/70 my-0.5"></div>' : ''}
         `;
       }).join('');
     }
@@ -804,170 +969,194 @@
     function renderMatchupCards(data) {
       const container = document.getElementById('matchups-list');
       document.getElementById('matchups-col-heading').textContent =
-        `Week ${data.league.week} Matchups ${data.autoSubByeOut ? '(⚡ Smart Auto-Sub Active)' : ''}`;
+        `WEEK ${data.league.week} SCOREBOARD ${data.autoSubByeOut ? '(⚡ AUTO-SUB)' : ''}`;
 
-      container.innerHTML = data.matchups.map((m) => {
+      const selectedMatch = data.matchups.find((x) => x.matchupId === selectedMatchupId) || data.matchups[0];
+      const selA = selectedMatch ? selectedMatch.teamA : null;
+      const selB = selectedMatch ? selectedMatch.teamB : null;
+      const abbr = (name) => (name || 'TEAM').replace(/[^A-Za-z0-9]/g, '').slice(0, 4).toUpperCase();
+
+      const matchupCardsHtml = data.matchups.map((m) => {
         const a = m.teamA;
         const b = m.teamB;
         const isSelected = m.matchupId === selectedMatchupId;
 
         const aWinImp = a.simulation.h2hWinProbImproved;
         const bWinImp = b.simulation.h2hWinProbImproved;
-        const aWinSlp = a.simulation.h2hWinProbSleeper;
-        const bWinSlp = b.simulation.h2hWinProbSleeper;
-
-        const aWinDiff = (aWinImp - aWinSlp) * 100;
-        const bWinDiff = (bWinImp - bWinSlp) * 100;
-
         const aScoreChanged = previousScores[a.rosterId] !== undefined && previousScores[a.rosterId] !== a.currentPts;
         const bScoreChanged = previousScores[b.rosterId] !== undefined && previousScores[b.rosterId] !== b.currentPts;
+        const isMyMatchup = a.rosterId === 3 || b.rosterId === 3;
 
         const renderTeamAlert = (t) => {
           if (t.autoSubCount > 0) {
-            return `<span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-xs font-semibold">⚡ ${t.autoSubCount} Auto-Sub</span>`;
+            return `<span class="px-1 py-0.2 rounded bg-[#e8c500]/20 text-[#ffe600] text-[10px] font-bold">⚡${t.autoSubCount}</span>`;
           }
           if (t.playersOnByeOrOut > 0) {
-            return `<span class="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-xs font-semibold">⚠️ ${t.playersOnByeOrOut} BYE/OUT</span>`;
+            return `<span class="px-1 py-0.2 rounded bg-[#d91b1b]/30 text-rose-300 text-[10px] font-bold">⚠️${t.playersOnByeOrOut} OUT</span>`;
           }
           return '';
         };
 
         return `
           <div onclick="selectMatchup(${m.matchupId})"
-               class="cursor-pointer rounded-2xl p-4 transition-all border ${
-                 isSelected
-                   ? 'bg-[#21293c] border-[#00ceb8] shadow-lg shadow-[#00ceb8]/10'
-                   : 'bg-[#171c28] border-[#2b354b] hover:bg-[#1d2433] hover:border-[#3b4866]'
+               class="cursor-pointer rounded-sm p-2.5 transition-all ${
+                 isSelected ? 'fc-metal-card-selected' : 'fc-metal-card'
                }">
-            <div class="flex items-center justify-between text-xs mb-2">
-              <div class="flex items-center gap-2">
-                <span class="font-bold font-mono-num text-[#00ceb8]">${formatPct(aWinImp)}</span>
-                ${showSleeperComparison && Math.abs(aWinDiff) >= 0.4 ? `
-                  <span class="text-xs px-1.5 py-0.5 rounded bg-[#3b82f6]/15 text-[#60a5fa] font-mono-num">
-                    ${formatSigned(aWinDiff, 1)}% vs Slp
-                  </span>
-                ` : ''}
+            <!-- Matchup Top Bar -->
+            <div class="flex items-center justify-between text-[11px] mb-1.5 pb-1 border-b border-white/10">
+              <div class="flex items-center gap-1.5">
+                ${isMyMatchup ? '<span class="inline-block w-2.5 h-2.5 bg-[#e8c500] border border-black"></span>' : ''}
+                <span class="font-extrabold uppercase tracking-wider ${isSelected ? 'text-[#ffe600]' : 'text-[#cbd5e1]'}">
+                  Matchup ${m.matchupId} ${isSelected ? '• WATCHING' : ''}
+                </span>
               </div>
-              <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Matchup ${m.matchupId} • H2H Win Prob</span>
-              <div class="flex items-center gap-2">
-                ${showSleeperComparison && Math.abs(bWinDiff) >= 0.4 ? `
-                  <span class="text-xs px-1.5 py-0.5 rounded bg-[#3b82f6]/15 text-[#60a5fa] font-mono-num">
-                    ${formatSigned(bWinDiff, 1)}% vs Slp
-                  </span>
-                ` : ''}
-                <span class="font-bold font-mono-num text-purple-400">${formatPct(bWinImp)}</span>
+              <div class="flex items-center gap-2 font-mono-num text-[11px]">
+                <span class="font-bold text-[#4ee468]">${abbr(a.teamName)} ${formatPct(aWinImp)}</span>
+                <span class="text-[#7f8790]">•</span>
+                <span class="font-bold text-[#cbd5e1]">${abbr(b.teamName)} ${formatPct(bWinImp)}</span>
               </div>
             </div>
 
-            <div class="w-full h-2 rounded-full bg-[#10141d] overflow-hidden flex mb-3.5 p-0.5 border border-[#2b354b]">
-              <div style="width: ${(aWinImp * 100).toFixed(1)}%" class="h-full bg-gradient-to-r from-[#00ceb8] to-[#2dd4bf] rounded-l-full transition-all duration-500"></div>
-              <div style="width: ${(bWinImp * 100).toFixed(1)}%" class="h-full bg-gradient-to-l from-purple-500 to-indigo-400 rounded-r-full transition-all duration-500"></div>
-            </div>
+            <!-- ESPN FantasyCast Dual Row + Right Inset Box -->
+            <div class="grid grid-cols-12 gap-2 items-center">
+              <!-- Left 7 Cols: Both Fantasy Teams Stacked -->
+              <div class="col-span-7 space-y-1.5">
+                <!-- Team A Row -->
+                <div class="flex items-center justify-between ${aScoreChanged ? 'score-updated' : ''}">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="inline-block w-2 h-4 rounded-xs shrink-0 ${a.rosterId === 3 ? 'bg-[#e8c500]' : 'bg-[#4ee468]'}"></span>
+                    <img src="${a.avatarUrl || 'https://sleepercdn.com/images/v2/icons/player_default.webp'}"
+                         onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
+                         class="w-6 h-6 rounded-sm object-cover border border-black shrink-0" />
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-1">
+                        <span class="font-extrabold text-xs sm:text-sm text-white truncate">${a.teamName}</span>
+                        <span class="text-[11px] text-[#9ca3af] font-mono-num">(${a.wins}-${a.losses})</span>
+                        ${renderTeamAlert(a)}
+                      </div>
+                    </div>
+                  </div>
+                  <span class="text-base font-black font-mono-num text-white ml-2">${a.currentPts.toFixed(2)}</span>
+                </div>
 
-            <!-- Team A -->
-            <div class="flex items-center justify-between py-1.5 px-2 rounded-xl ${aScoreChanged ? 'score-updated' : ''}">
-              <div class="flex items-center gap-2.5 min-w-0">
-                <img src="${a.avatarUrl || 'https://sleepercdn.com/images/v2/icons/player_default.webp'}"
-                     onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
-                     class="w-9 h-9 rounded-full object-cover border border-[#36425c] shrink-0" />
-                <div class="min-w-0">
-                  <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="font-bold text-sm text-white truncate">${a.teamName}</span>
-                    <span class="text-xs text-slate-400 font-mono-num">(${a.wins}-${a.losses})</span>
-                    ${renderTeamAlert(a)}
+                <!-- Team B Row -->
+                <div class="flex items-center justify-between ${bScoreChanged ? 'score-updated' : ''}">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="inline-block w-2 h-4 rounded-xs shrink-0 ${b.rosterId === 3 ? 'bg-[#e8c500]' : 'bg-[#737b84]'}"></span>
+                    <img src="${b.avatarUrl || 'https://sleepercdn.com/images/v2/icons/player_default.webp'}"
+                         onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
+                         class="w-6 h-6 rounded-sm object-cover border border-black shrink-0" />
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-1">
+                        <span class="font-extrabold text-xs sm:text-sm text-white truncate">${b.teamName}</span>
+                        <span class="text-[11px] text-[#9ca3af] font-mono-num">(${b.wins}-${b.losses})</span>
+                        ${renderTeamAlert(b)}
+                      </div>
+                    </div>
                   </div>
-                  <div class="flex items-center gap-2 text-xs text-slate-400 flex-wrap">
-                    <span>@${a.ownerName}</span>
-                    <span>•</span>
-                    <span class="text-slate-300">${a.playersInProgress} live, ${a.playersYetToPlay} left</span>
-                    <span>•</span>
-                    <span class="px-1.5 py-0.5 rounded text-xs font-mono-num ${
-                      a.simulation.medianWinProbImproved >= 0.5 ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-800 text-slate-400'
-                    }">Med: ${formatPct(a.simulation.medianWinProbImproved)}</span>
-                  </div>
+                  <span class="text-base font-black font-mono-num text-white ml-2">${b.currentPts.toFixed(2)}</span>
                 </div>
               </div>
-              <div class="text-right shrink-0 ml-2">
-                <div class="text-lg font-extrabold font-mono-num text-white leading-tight">${a.currentPts.toFixed(2)}</div>
-                <div class="text-xs font-mono-num text-[#00ceb8] font-semibold">
-                  Proj: ${a.improvedTotalProj.toFixed(2)}
-                  ${showSleeperComparison ? `<span class="text-slate-400 font-normal">(Slp ${a.sleeperTotalProj.toFixed(1)})</span>` : ''}
-                </div>
-              </div>
-            </div>
 
-            <div class="border-t border-[#283246] my-1.5"></div>
-
-            <!-- Team B -->
-            <div class="flex items-center justify-between py-1.5 px-2 rounded-xl ${bScoreChanged ? 'score-updated' : ''}">
-              <div class="flex items-center gap-2.5 min-w-0">
-                <img src="${b.avatarUrl || 'https://sleepercdn.com/images/v2/icons/player_default.webp'}"
-                     onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
-                     class="w-9 h-9 rounded-full object-cover border border-[#36425c] shrink-0" />
-                <div class="min-w-0">
-                  <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="font-bold text-sm text-white truncate">${b.teamName}</span>
-                    <span class="text-xs text-slate-400 font-mono-num">(${b.wins}-${b.losses})</span>
-                    ${renderTeamAlert(b)}
-                  </div>
-                  <div class="flex items-center gap-2 text-xs text-slate-400 flex-wrap">
-                    <span>@${b.ownerName}</span>
-                    <span>•</span>
-                    <span class="text-slate-300">${b.playersInProgress} live, ${b.playersYetToPlay} left</span>
-                    <span>•</span>
-                    <span class="px-1.5 py-0.5 rounded text-xs font-mono-num ${
-                      b.simulation.medianWinProbImproved >= 0.5 ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-800 text-slate-400'
-                    }">Med: ${formatPct(b.simulation.medianWinProbImproved)}</span>
-                  </div>
+              <!-- Right 5 Cols: Classic ESPN Inset Dark Box (Proj & Median Win %) -->
+              <div class="col-span-5 fc-inset-box rounded-sm px-2.5 py-1.5 text-[11px] font-mono-num space-y-1">
+                <div class="flex items-center justify-between">
+                  <span class="text-[#cbd5e1] font-bold truncate">${abbr(a.teamName)}: ${a.improvedTotalProj.toFixed(1)}</span>
+                  <span class="${a.simulation.medianWinProbImproved >= 0.5 ? 'text-[#4ee468]' : 'text-[#9ca3af]'} font-bold">M:${formatPct(a.simulation.medianWinProbImproved)}</span>
                 </div>
-              </div>
-              <div class="text-right shrink-0 ml-2">
-                <div class="text-lg font-extrabold font-mono-num text-white leading-tight">${b.currentPts.toFixed(2)}</div>
-                <div class="text-xs font-mono-num text-purple-300 font-semibold">
-                  Proj: ${b.improvedTotalProj.toFixed(2)}
-                  ${showSleeperComparison ? `<span class="text-slate-400 font-normal">(Slp ${b.sleeperTotalProj.toFixed(1)})</span>` : ''}
+                <div class="flex items-center justify-between">
+                  <span class="text-[#cbd5e1] font-bold truncate">${abbr(b.teamName)}: ${b.improvedTotalProj.toFixed(1)}</span>
+                  <span class="${b.simulation.medianWinProbImproved >= 0.5 ? 'text-[#4ee468]' : 'text-[#9ca3af]'} font-bold">M:${formatPct(b.simulation.medianWinProbImproved)}</span>
                 </div>
               </div>
             </div>
           </div>
         `;
       }).join('');
+
+      // Also render the classic ESPN FantasyCast NFL Games Box underneath so users can see how many starters are in each NFL game!
+      let nflCastHtml = '';
+      if (data.nflGames && data.nflGames.length && selA && selB) {
+        const abbrA = abbr(selA.teamName);
+        const abbrB = abbr(selB.teamName);
+        const gameCards = data.nflGames.map((g) => {
+          const teamsInGame = new Set([g.awayTeam, g.homeTeam]);
+          const aCount = (selA.starters || []).filter((p) => p && teamsInGame.has(p.team)).length;
+          const bCount = (selB.starters || []).filter((p) => p && teamsInGame.has(p.team)).length;
+          const isLive = g.status === 'in_game';
+          const isPre = g.status === 'pre_game';
+          const statusStr = isLive ? `Q${g.quarter} ${g.clock}` : (isPre ? g.clock : 'FINAL');
+          return `
+            <div class="fc-metal-card rounded-sm px-2.5 py-2 grid grid-cols-12 gap-2 items-center">
+              <div class="col-span-4 font-extrabold text-xs text-white leading-tight space-y-0.5">
+                <div class="flex items-center justify-between pr-2">
+                  <span>${g.awayTeam}</span>
+                  ${!isPre ? `<span class="text-[#ffe600] font-mono-num">${g.awayScore}</span>` : ''}
+                </div>
+                <div class="flex items-center justify-between pr-2">
+                  <span>${g.homeTeam}</span>
+                  ${!isPre ? `<span class="text-[#ffe600] font-mono-num">${g.homeScore}</span>` : ''}
+                </div>
+              </div>
+              <div class="col-span-3 text-right pr-1">
+                <span class="text-[11px] font-bold ${isLive ? 'text-[#4ee468]' : 'text-[#e2e8f0]'}">${statusStr}</span>
+              </div>
+              <div class="col-span-5 fc-inset-box rounded-sm px-2.5 py-1 text-[11px] leading-snug">
+                <div class="${aCount > 0 ? 'text-[#ffe600] font-bold' : 'text-[#9ca3af]'}">
+                  ${abbrA}: ${aCount === 0 ? 'No players' : `${aCount} player${aCount > 1 ? 's' : ''}`}
+                </div>
+                <div class="${bCount > 0 ? 'text-white font-bold' : 'text-[#9ca3af]'}">
+                  ${abbrB}: ${bCount === 0 ? 'No players' : `${bCount} player${bCount > 1 ? 's' : ''}`}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        nflCastHtml = `
+          <div class="pt-3 mt-3 border-t border-[#26292e] space-y-1.5">
+            <div class="flex items-center justify-between px-1">
+              <span class="text-[11px] font-extrabold uppercase tracking-wider text-[#cbd5e1]">NFL GAMES (${abbrA} vs ${abbrB} STARTERS)</span>
+              <span class="text-[10px] text-[#9ca3af]">Active Matchup Key</span>
+            </div>
+            <div class="space-y-1.5 max-h-[420px] overflow-y-auto pr-0.5">
+              ${gameCards}
+            </div>
+          </div>
+        `;
+      }
+
+      container.innerHTML = matchupCardsHtml + nflCastHtml;
     }
 
     function renderPlayerCell(p, side, rosterObj = null, isBench = false) {
-      const isLeft = side === 'left';
       const isLive = p.gameStatus === 'in_game';
       const isPre = p.gameStatus === 'pre_game';
       const isBye = p.gameStatus === 'bye';
       const projDiff = p.improvedProj - p.sleeperProj;
+      const isMyTeam = rosterObj && rosterObj.rosterId === 3;
 
       let gameTag = '';
       if (isBye) {
-        gameTag = `<span class="text-xs font-bold text-rose-400">BYE WEEK</span>`;
+        gameTag = `<span class="text-[11px] font-bold text-rose-400">BYE WEEK</span>`;
       } else if (isLive) {
-        gameTag = `<span class="text-xs font-semibold text-[#00ceb8]">Q${p.quarter} ${p.clock} • ${p.gameScore}</span>`;
+        gameTag = `<span class="text-[11px] font-bold text-[#4ee468]">Q${p.quarter} ${p.clock} • ${p.gameScore}</span>`;
       } else if (isPre) {
-        gameTag = `<span class="text-xs text-amber-300/90">${p.clock} • ${p.gameScore}</span>`;
+        const oppLabel = p.opponent ? `${p.opponent}, ` : '';
+        gameTag = `<span class="text-[11px] text-[#9ca3af]">${oppLabel}${p.clock || 'Sun 1:00 ET'}</span>`;
       } else {
-        gameTag = `<span class="text-xs text-slate-500">FINAL</span>`;
+        const oppLabel = p.opponent ? `${p.opponent} • ` : '';
+        gameTag = `<span class="text-[11px] text-[#9ca3af]">${oppLabel}FINAL</span>`;
       }
 
       const badges = [];
       if (p.autoSubFor) {
-        badges.push(`<span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-400/40">⚡ Sub for ${p.autoSubFor}</span>`);
+        badges.push(`<span class="px-1 py-0.2 rounded text-[10px] font-bold bg-[#e8c500]/20 text-[#ffe600]">⚡Sub</span>`);
       }
       if (p.inRedZone) {
-        badges.push(`<span class="px-1.5 py-0.5 rounded text-xs font-bold bg-rose-500/25 text-rose-300 border border-rose-500/40">RED ZONE</span>`);
+        badges.push(`<span class="px-1 py-0.2 rounded text-[10px] font-black bg-[#d91b1b] text-white">RZ</span>`);
       } else if (p.hasPossession) {
-        badges.push(`<span class="px-1.5 py-0.5 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-300">🏈 POSS</span>`);
-      }
-      if (p.factors?.reasons?.length) {
-        for (const r of p.factors.reasons) {
-          if (r !== 'Live in Red Zone' && r !== 'Has possession') {
-            const isWarning = r.includes('BYE') || r.includes('Status:') || r.includes('0 snaps');
-            badges.push(`<span class="px-1.5 py-0.5 rounded text-xs ${isWarning ? 'bg-rose-500/20 text-rose-300' : 'bg-[#253047] text-sky-300'}">${r}</span>`);
-          }
-        }
+        badges.push(`<span class="px-1 py-0.2 rounded text-[10px] font-bold bg-[#184711] text-[#86efac]">🏈</span>`);
       }
 
       // If bench player, build quick "What-If Swap into Slot" dropdown
@@ -982,59 +1171,55 @@
         if (eligibleSlots.length) {
           swapControl = `
             <select onchange="if(this.value !== '') { performWhatIfSwap(${rosterObj.rosterId}, '${p.playerId}', Number(this.value)); this.value=''; }"
-                    class="mt-1 bg-[#1a2234] border border-[#33415c] text-xs text-slate-300 rounded px-1.5 py-0.5 focus:outline-none hover:border-[#00ceb8]">
-              <option value="">⇄ Test What-If Lineup Swap...</option>
+                    class="mt-0.5 bg-[#0e1013] border border-[#3a3f47] text-[10px] text-[#cbd5e1] rounded-xs px-1 py-0.2 focus:outline-none hover:border-[#ffe600]">
+              <option value="">⇄ What-If Swap...</option>
               ${eligibleSlots.join('')}
             </select>
           `;
         }
       }
 
-      const avatarImg = `
-        <div class="relative shrink-0">
-          <img src="https://sleepercdn.com/content/nfl/players/thumb/${p.playerId}.jpg"
-               onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
-               class="w-10 h-10 rounded-full object-cover bg-[#10141d] border ${
-                 isLive ? 'border-[#00ceb8]' : (isBye ? 'border-rose-500/50 opacity-60' : 'border-[#2f3b52]')
-               }" />
-          ${isLive ? `<span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#00ceb8] ring-2 ring-[#171c28] live-dot"></span>` : ''}
-        </div>
-      `;
-
-      const scoreBlock = `
-        <div class="${isLeft ? 'text-right' : 'text-left'} shrink-0 min-w-[78px]">
-          <div class="text-sm font-extrabold font-mono-num ${isBye ? 'text-rose-400' : 'text-white'}">${p.currentPts.toFixed(2)}</div>
-          <div class="text-xs font-mono-num ${isLive || isPre ? 'text-[#00ceb8] font-semibold' : 'text-slate-500'}">
-            ${p.improvedProj.toFixed(2)}
-            ${showSleeperComparison && Math.abs(projDiff) >= 0.15 ? `<span class="${projDiff > 0 ? 'text-emerald-400' : 'text-rose-400'}">(${formatSigned(projDiff, 1)})</span>` : ''}
-          </div>
-          ${(isLive || isPre) && p.remSdImproved > 0 ? `
-            <div class="text-xs font-mono-num text-slate-500">±${p.remSdImproved.toFixed(1)} SD</div>
-          ` : ''}
-        </div>
-      `;
-
-      const infoBlock = `
-        <div class="min-w-0 flex-1 ${isLeft ? 'text-left' : 'text-right'}">
-          <div class="flex items-center gap-1.5 ${isLeft ? 'justify-start' : 'justify-end'}">
-            <span class="font-semibold text-xs sm:text-sm text-slate-100 truncate">${p.fullName}</span>
-            ${p.injuryStatus ? `<span class="text-xs font-bold px-1 rounded bg-amber-500/20 text-amber-400">${p.injuryStatus}</span>` : ''}
-          </div>
-          <div class="text-xs text-slate-400 flex items-center gap-1.5 flex-wrap ${isLeft ? 'justify-start' : 'justify-end'}">
-            <span class="font-semibold text-slate-300">${p.team} • ${p.position}</span>
-            <span>•</span>
-            ${gameTag}
-          </div>
-          ${badges.length ? `<div class="mt-1 flex flex-wrap gap-1 ${isLeft ? 'justify-start' : 'justify-end'}">${badges.join('')}</div>` : ''}
-          ${swapControl}
-        </div>
-      `;
-
+      // Classic ESPN FantasyCast Player Row: [Headshot Left] | [Name, Team + Game Time] | [Right Score Cell]
       return `
-        <div class="flex items-center justify-between gap-2.5 p-2.5 rounded-xl bg-[#131823]/70 border ${
-          p.autoSubFor ? 'border-amber-400/50 bg-amber-950/10' : (isBye ? 'border-rose-500/35 bg-rose-950/10' : 'border-[#242e42]')
+        <div class="fc-player-row flex items-stretch min-h-[46px] ${
+          isLive ? 'border-l-2 !border-l-[#4ee468]' : (isMyTeam ? 'border-l-2 !border-l-[#e8c500]/75' : '')
         }">
-          ${isLeft ? `${avatarImg}${infoBlock}${scoreBlock}` : `${scoreBlock}${infoBlock}${avatarImg}`}
+          <!-- Mugshot -->
+          <div class="w-10 sm:w-11 bg-[#111315] border-r border-[#2d3137] shrink-0 flex items-end justify-center overflow-hidden relative">
+            <img src="https://sleepercdn.com/content/nfl/players/thumb/${p.playerId}.jpg"
+                 onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
+                 class="w-10 h-10 object-cover ${isBye ? 'opacity-50 grayscale' : ''}" />
+            ${isLive ? `<span class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-[#4ee468] live-dot"></span>` : ''}
+          </div>
+
+          <!-- Player Name, Team & Game Info -->
+          <div class="flex-1 min-w-0 px-2 py-1 flex flex-col justify-center">
+            <div class="flex items-center gap-1 leading-tight">
+              <span class="font-bold text-xs text-[#eef2f6] truncate">${p.fullName}</span>
+              <span class="text-[11px] text-[#9ca3af] shrink-0">, ${p.team}</span>
+              ${p.injuryStatus ? `<span class="text-[10px] font-extrabold text-[#ff4d4d] ml-0.5">${p.injuryStatus}</span>` : ''}
+              ${badges.join('')}
+            </div>
+            <div class="leading-tight mt-0.5 flex items-center gap-1.5 flex-wrap">
+              ${gameTag}
+            </div>
+            ${swapControl}
+          </div>
+
+          <!-- Right Score Box (Matches ESPN FantasyCast separated right-hand point cell) -->
+          <div class="w-14 sm:w-16 bg-black/30 border-l border-[#2d3137] shrink-0 px-1.5 py-1 flex flex-col items-end justify-center font-mono-num">
+            <div class="text-sm sm:text-base font-bold leading-none ${isBye ? 'text-rose-400' : 'text-white'}">
+              ${p.currentPts === 0 && isPre ? '0' : p.currentPts.toFixed(2)}
+            </div>
+            <div class="text-[10px] leading-tight mt-0.5 ${isLive || isPre ? 'text-[#86efac] font-semibold' : 'text-[#7f8790]'}">
+              P:${p.improvedProj.toFixed(1)}
+            </div>
+            ${showSleeperComparison && Math.abs(projDiff) >= 0.2 ? `
+              <div class="text-[9px] leading-none ${projDiff > 0 ? 'text-[#ffe600]' : 'text-rose-400'}">
+                ${formatSigned(projDiff, 1)}
+              </div>
+            ` : ''}
+          </div>
         </div>
       `;
     }
@@ -1051,14 +1236,12 @@
       const rowsHtml = slots.map((slot, idx) => {
         const pA = a.starters[idx];
         const pB = b.starters[idx];
-        const slotLabel = slot === 'SUPER_FLEX' ? 'SFLEX' : (slot === 'IDP_FLEX' ? 'IDP' : slot);
+        const slotLabel = slot === 'SUPER_FLEX' ? 'SFLX' : (slot === 'IDP_FLEX' ? 'IDP' : slot);
         return `
-          <div class="grid grid-cols-12 gap-2 items-center py-1">
+          <div class="grid grid-cols-12 gap-1 items-stretch">
             <div class="col-span-5">${pA ? renderPlayerCell(pA, 'left', a, false) : ''}</div>
-            <div class="col-span-2 flex justify-center">
-              <span class="px-2.5 py-1 rounded-lg text-xs font-extrabold tracking-wider pos-${slot}">
-                ${slotLabel}
-              </span>
+            <div class="col-span-2 fc-pos-box flex items-center justify-center font-extrabold text-xs tracking-wider">
+              ${slotLabel}
             </div>
             <div class="col-span-5">${pB ? renderPlayerCell(pB, 'right', b, false) : ''}</div>
           </div>
@@ -1073,20 +1256,20 @@
           const pA = a.bench[i];
           const pB = b.bench[i];
           benchRows.push(`
-            <div class="grid grid-cols-12 gap-2 items-center py-1 opacity-90">
+            <div class="grid grid-cols-12 gap-1 items-stretch opacity-95">
               <div class="col-span-5">${pA ? renderPlayerCell(pA, 'left', a, true) : ''}</div>
-              <div class="col-span-2 flex justify-center">
-                <span class="px-2 py-1 rounded-lg text-xs font-bold bg-slate-800 text-slate-400 border border-slate-700">BN</span>
+              <div class="col-span-2 fc-pos-box flex items-center justify-center font-extrabold text-xs text-[#9ca3af]">
+                BE
               </div>
               <div class="col-span-5">${pB ? renderPlayerCell(pB, 'right', b, true) : ''}</div>
             </div>
           `);
         }
         benchHtml = `
-          <div class="mt-4 pt-4 border-t border-[#2b354b] space-y-1.5">
-            <div class="text-xs font-semibold text-slate-400 px-2 mb-2 flex items-center justify-between">
-              <span>BENCH (Use "⇄ Test What-If Lineup Swap" on any bench player to simulate lineup changes!)</span>
-              <button onclick="fetchLiveState(true)" class="text-amber-300 hover:underline">Reset to Live Sleeper Lineups</button>
+          <div class="mt-3 pt-2.5 border-t-2 border-[#2a5c20] space-y-0.5">
+            <div class="text-[11px] font-bold text-[#bbf7d0] px-1 mb-1 flex items-center justify-between">
+              <span>BENCH (BE) — Use "⇄ What-If Swap" to test bench starters</span>
+              <button onclick="fetchLiveState(true)" class="text-[#ffe600] hover:underline font-extrabold">Reset Lineups</button>
             </div>
             ${benchRows.join('')}
           </div>
@@ -1094,107 +1277,96 @@
       }
 
       container.innerHTML = `
-        <div class="bg-gradient-to-b from-[#1e2638] to-[#171c28] p-5 border-b border-[#2b354b]">
-          <div class="grid grid-cols-12 gap-3 items-center">
-            <!-- Team A Summary -->
+        <!-- CLASSIC ESPN FANTASYCAST TURF MATCHUP HEADER -->
+        <div class="p-3 pb-2 border-b border-[#2e6e23]">
+          <div class="grid grid-cols-12 gap-1 items-end">
+            <!-- Team A Header Stack -->
             <div class="col-span-5">
-              <div class="flex items-center gap-3">
-                <img src="${a.avatarUrl || 'https://sleepercdn.com/images/v2/icons/player_default.webp'}"
-                     onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
-                     class="w-12 h-12 rounded-full border-2 border-[#00ceb8]" />
-                <div class="min-w-0">
-                  <h3 class="font-extrabold text-base text-white truncate">${a.teamName}</h3>
-                  <p class="text-xs text-slate-400">@${a.ownerName} • ${a.wins}-${a.losses}</p>
+              <div class="flex items-center justify-between px-1 mb-1">
+                <div class="truncate">
+                  <span class="text-xs text-[#bbf7d0] font-semibold">(${a.wins}-${a.losses})</span>
+                  <span class="text-xs sm:text-sm font-extrabold text-white ml-1">${a.teamName}</span>
                 </div>
-              </div>
-              <div class="mt-3 flex items-baseline gap-3">
-                <span class="text-3xl font-extrabold font-mono-num text-white">${a.currentPts.toFixed(2)}</span>
-                <div class="text-xs font-mono-num">
-                  <div class="text-[#00ceb8] font-bold">Imp Proj: ${a.improvedTotalProj.toFixed(2)}</div>
-                  <div class="text-slate-400">Sleeper Proj: ${a.sleeperTotalProj.toFixed(2)} (${formatSigned(a.projDeltaVsSleeper)})</div>
-                </div>
-              </div>
-              <div class="mt-2 flex flex-wrap gap-1.5 text-xs font-mono-num items-center">
-                <span class="px-2 py-0.5 rounded bg-[#00ceb8]/15 text-[#00ceb8] font-semibold">
-                  H2H Win: ${formatPct(a.simulation.h2hWinProbImproved)}
-                </span>
-                <span class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-semibold">
-                  Med Win: ${formatPct(a.simulation.medianWinProbImproved)}
-                </span>
-                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                  80% Range: ${a.simulation.p10.toFixed(1)}–${a.simulation.p90.toFixed(1)}
-                </span>
-                <button onclick="openOptimizerForRoster(${a.rosterId})" class="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/30 font-sans font-bold transition">
-                  🎯 Optimize Lineup
+                <button onclick="openOptimizerForRoster(${a.rosterId})" class="px-1.5 py-0.5 rounded-xs bg-[#e8c500] text-black text-[10px] font-black uppercase hover:bg-[#ffe600] shrink-0">
+                  Optimize
                 </button>
+              </div>
+              <!-- ESPN "To Play / In Play / Proj" Olive Bar -->
+              <div class="bg-black/40 border border-[#326b26] px-2 py-1 text-[11px] font-bold text-[#e2f5e4] flex items-center justify-between flex-wrap gap-1">
+                <span>To Play: ${a.playersYetToPlay}</span>
+                <span>In Play: ${a.playersInProgress}</span>
+                <span class="text-[#ffe600]">Proj: ${a.improvedTotalProj.toFixed(1)}</span>
+              </div>
+              <!-- ESPN "Total Score: X" Bar -->
+              <div class="fc-metal-card px-2.5 py-1.5 mt-0.5 flex items-baseline justify-between">
+                <span class="text-[11px] font-bold text-[#86efac]">
+                  H2H: ${formatPct(a.simulation.h2hWinProbImproved)} • Med: ${formatPct(a.simulation.medianWinProbImproved)}
+                </span>
+                <div class="text-right">
+                  <span class="text-xs font-bold text-[#cbd5e1] mr-1">Total Score:</span>
+                  <span class="text-xl sm:text-2xl font-black font-mono-num text-white">${a.currentPts === 0 ? '0' : a.currentPts.toFixed(2)}</span>
+                </div>
               </div>
             </div>
 
-            <!-- Center VS -->
-            <div class="col-span-2 text-center">
-              <div class="inline-flex flex-col items-center px-3 py-2 rounded-xl bg-[#111622] border border-[#2b354b]">
-                <span class="text-xs font-extrabold text-slate-400">WEEK ${data.league.week}</span>
-                <span class="text-xs text-[#00ceb8] font-mono-num font-bold mt-1">Med: ${data.leagueMedian.expectedMedianImproved.toFixed(1)}</span>
+            <!-- Center Column Spacer / Median Cutoff Pill -->
+            <div class="col-span-2 flex flex-col items-center justify-end pb-1">
+              <div class="fc-pos-box w-full py-1.5 text-center rounded-xs">
+                <div class="text-[9px] font-bold text-[#9ca3af] uppercase">Median</div>
+                <div class="text-xs font-black text-[#ffe600] font-mono-num">${data.leagueMedian.expectedMedianImproved.toFixed(1)}</div>
               </div>
             </div>
 
-            <!-- Team B Summary -->
-            <div class="col-span-5 text-right">
-              <div class="flex items-center justify-end gap-3">
-                <div class="min-w-0">
-                  <h3 class="font-extrabold text-base text-white truncate">${b.teamName}</h3>
-                  <p class="text-xs text-slate-400">@${b.ownerName} • ${b.wins}-${b.losses}</p>
+            <!-- Team B Header Stack -->
+            <div class="col-span-5">
+              <div class="flex items-center justify-between px-1 mb-1">
+                <div class="truncate">
+                  <span class="text-xs text-[#bbf7d0] font-semibold">(${b.wins}-${b.losses})</span>
+                  <span class="text-xs sm:text-sm font-extrabold text-white ml-1">${b.teamName}</span>
                 </div>
-                <img src="${b.avatarUrl || 'https://sleepercdn.com/images/v2/icons/player_default.webp'}"
-                     onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
-                     class="w-12 h-12 rounded-full border-2 border-purple-400" />
-              </div>
-              <div class="mt-3 flex items-baseline justify-end gap-3">
-                <div class="text-xs font-mono-num text-right">
-                  <div class="text-purple-300 font-bold">Imp Proj: ${b.improvedTotalProj.toFixed(2)}</div>
-                  <div class="text-slate-400">Sleeper Proj: ${b.sleeperTotalProj.toFixed(2)} (${formatSigned(b.projDeltaVsSleeper)})</div>
-                </div>
-                <span class="text-3xl font-extrabold font-mono-num text-white">${b.currentPts.toFixed(2)}</span>
-              </div>
-              <div class="mt-2 flex flex-wrap justify-end gap-1.5 text-xs font-mono-num items-center">
-                <button onclick="openOptimizerForRoster(${b.rosterId})" class="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/30 font-sans font-bold transition">
-                  🎯 Optimize Lineup
+                <button onclick="openOptimizerForRoster(${b.rosterId})" class="px-1.5 py-0.5 rounded-xs bg-[#32363c] text-[#e2e8f0] border border-[#52575f] text-[10px] font-bold uppercase hover:text-white shrink-0">
+                  Optimize
                 </button>
-                <span class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold">
-                  H2H Win: ${formatPct(b.simulation.h2hWinProbImproved)}
+              </div>
+              <!-- ESPN "To Play / In Play / Proj" Olive Bar -->
+              <div class="bg-black/40 border border-[#326b26] px-2 py-1 text-[11px] font-bold text-[#e2f5e4] flex items-center justify-between flex-wrap gap-1">
+                <span>To Play: ${b.playersYetToPlay}</span>
+                <span>In Play: ${b.playersInProgress}</span>
+                <span class="text-[#ffe600]">Proj: ${b.improvedTotalProj.toFixed(1)}</span>
+              </div>
+              <!-- ESPN "Total Score: X" Bar -->
+              <div class="fc-metal-card px-2.5 py-1.5 mt-0.5 flex items-baseline justify-between">
+                <span class="text-[11px] font-bold text-[#cbd5e1]">
+                  H2H: ${formatPct(b.simulation.h2hWinProbImproved)} • Med: ${formatPct(b.simulation.medianWinProbImproved)}
                 </span>
-                <span class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-semibold">
-                  Med Win: ${formatPct(b.simulation.medianWinProbImproved)}
-                </span>
-                <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                  80% Range: ${b.simulation.p10.toFixed(1)}–${b.simulation.p90.toFixed(1)}
-                </span>
+                <div class="text-right">
+                  <span class="text-xs font-bold text-[#cbd5e1] mr-1">Total Score:</span>
+                  <span class="text-xl sm:text-2xl font-black font-mono-num text-white">${b.currentPts === 0 ? '0' : b.currentPts.toFixed(2)}</span>
+                </div>
               </div>
             </div>
           </div>
 
-          <div class="mt-4 pt-3 border-t border-[#2b354b] flex flex-wrap items-center justify-between gap-2 text-xs font-mono-num">
+          <!-- Dual-Win Outcome Strip -->
+          <div class="mt-1.5 px-2 py-1 bg-black/35 border border-[#2a5c20] flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono-num">
             <div class="flex items-center gap-2">
-              <span class="text-slate-400">Weekly Outcome Prob:</span>
-              <span class="text-emerald-300">2-0: ${formatPct(a.simulation.prob2_0)}</span>
-              <span class="text-amber-300">1-1: ${formatPct(a.simulation.prob1_1)}</span>
-              <span class="text-rose-300">0-2: ${formatPct(a.simulation.prob0_2)}</span>
+              <span class="text-[#bbf7d0] font-bold">2-0 Sweep: <b class="text-[#4ee468]">${formatPct(a.simulation.prob2_0)}</b></span>
+              <span class="text-[#cbd5e1]">1-1: <b>${formatPct(a.simulation.prob1_1)}</b></span>
+              <span class="text-rose-300">0-2: <b>${formatPct(a.simulation.prob0_2)}</b></span>
             </div>
+            <button onclick="showBench = !showBench; renderSelectedMatchupDetail(currentState);" class="text-[#ffe600] hover:underline font-sans font-bold text-[11px]">
+              ${showBench ? 'Hide Bench (BE) ▲' : 'Show Bench (BE) ▼'}
+            </button>
             <div class="flex items-center gap-2">
-              <span class="text-emerald-300">2-0: ${formatPct(b.simulation.prob2_0)}</span>
-              <span class="text-amber-300">1-1: ${formatPct(b.simulation.prob1_1)}</span>
-              <span class="text-rose-300">0-2: ${formatPct(b.simulation.prob0_2)}</span>
+              <span class="text-[#bbf7d0] font-bold">2-0 Sweep: <b class="text-[#4ee468]">${formatPct(b.simulation.prob2_0)}</b></span>
+              <span class="text-[#cbd5e1]">1-1: <b>${formatPct(b.simulation.prob1_1)}</b></span>
+              <span class="text-rose-300">0-2: <b>${formatPct(b.simulation.prob0_2)}</b></span>
             </div>
           </div>
         </div>
 
-        <div class="p-4 space-y-1.5">
-          <div class="flex items-center justify-between text-xs text-slate-400 px-2 pb-1">
-            <span>STARTERS (Current / Improved Proj)</span>
-            <button onclick="showBench = !showBench; renderSelectedMatchupDetail(currentState);" class="text-[#00ceb8] hover:underline font-semibold">
-              ${showBench ? 'Hide Bench ▲' : 'Show Bench & What-If Swaps ▼'}
-            </button>
-          </div>
+        <!-- STARTERS & BENCH BOARD ON TURF -->
+        <div class="p-3 pt-2 space-y-0.5">
           ${rowsHtml}
           ${benchHtml}
         </div>
@@ -1217,68 +1389,70 @@
         const widthPct = Math.max(2, ((sim.p90 - sim.p10) / span) * 100);
         const meanPct = Math.min(100, Math.max(0, ((r.improvedTotalProj - minScore) / span) * 100));
         const isTop5 = r.rank <= 5;
+        const isMyTeam = r.rosterId === 3;
 
         const rowHtml = `
-          <tr class="hover:bg-[#1e2638]/70 transition">
-            <td class="py-3 px-2 font-mono-num font-bold ${isTop5 ? 'text-[#00ceb8]' : 'text-rose-400'}">
+          <tr class="hover:bg-[#1f242a] transition ${isMyTeam ? 'bg-[#183614]/60' : ''}">
+            <td class="py-2.5 px-2 font-mono-num font-extrabold ${isTop5 ? 'text-[#4ee468]' : 'text-[#9ca3af]'}">
               #${r.rank}
             </td>
-            <td class="py-3 px-2">
-              <div class="flex items-center gap-2.5">
+            <td class="py-2.5 px-2">
+              <div class="flex items-center gap-2">
+                <span class="inline-block w-2 h-4 rounded-xs ${isMyTeam ? 'bg-[#e8c500]' : (isTop5 ? 'bg-[#24ab44]' : 'bg-[#52575f]')}"></span>
                 <img src="${r.avatarUrl || 'https://sleepercdn.com/images/v2/icons/player_default.webp'}"
                      onerror="this.src='https://sleepercdn.com/images/v2/icons/player_default.webp'"
-                     class="w-7 h-7 rounded-full object-cover border border-[#36425c]" />
+                     class="w-7 h-7 rounded-sm object-cover border border-black" />
                 <div>
-                  <div class="font-bold text-white text-xs sm:text-sm">${r.teamName}</div>
-                  <div class="text-xs text-slate-400">@${r.ownerName} (${r.record}) • ${r.playersInProgress} live, ${r.playersYetToPlay} pre</div>
+                  <div class="font-extrabold text-white text-xs sm:text-sm">${r.teamName}</div>
+                  <div class="text-[11px] text-[#9ca3af]">@${r.ownerName} (${r.record}) • To Play: ${r.playersYetToPlay}</div>
                 </div>
               </div>
             </td>
-            <td class="py-3 px-2 text-right font-mono-num font-bold text-white">${r.currentPts.toFixed(2)}</td>
-            <td class="py-3 px-2 text-right font-mono-num font-bold text-[#00ceb8]">${r.improvedTotalProj.toFixed(2)}</td>
-            <td class="py-3 px-2 text-right font-mono-num text-xs">
-              <span class="text-slate-300">${r.sleeperTotalProj.toFixed(2)}</span>
-              <span class="${r.projDeltaVsSleeper >= 0 ? 'text-emerald-400' : 'text-rose-400'} ml-1">
+            <td class="py-2.5 px-2 text-right font-mono-num font-extrabold text-white">${r.currentPts.toFixed(2)}</td>
+            <td class="py-2.5 px-2 text-right font-mono-num font-extrabold text-[#ffe600]">${r.improvedTotalProj.toFixed(2)}</td>
+            <td class="py-2.5 px-2 text-right font-mono-num text-xs">
+              <span class="text-[#cbd5e1]">${r.sleeperTotalProj.toFixed(2)}</span>
+              <span class="${r.projDeltaVsSleeper >= 0 ? 'text-[#4ee468]' : 'text-rose-400'} ml-1 font-bold">
                 (${formatSigned(r.projDeltaVsSleeper)})
               </span>
             </td>
-            <td class="py-3 px-3 min-w-[200px]">
-              <div class="relative h-5 bg-[#111622] rounded-lg border border-[#2b354b] overflow-hidden">
-                <div style="left: ${medLinePct.toFixed(1)}%" class="absolute top-0 bottom-0 w-0.5 bg-amber-400/80 z-10" title="Expected Median"></div>
+            <td class="py-2.5 px-3 min-w-[200px]">
+              <div class="relative h-5 fc-inset-box rounded-xs overflow-hidden">
+                <div style="left: ${medLinePct.toFixed(1)}%" class="absolute top-0 bottom-0 w-0.5 bg-[#ffe600] z-10" title="Expected Median"></div>
                 <div style="left: ${leftPct.toFixed(1)}%; width: ${widthPct.toFixed(1)}%"
-                     class="absolute top-1 bottom-1 rounded ${isTop5 ? 'bg-[#00ceb8]/35 border border-[#00ceb8]/60' : 'bg-purple-500/30 border border-purple-400/50'}"></div>
+                     class="absolute top-1 bottom-1 rounded-xs ${isTop5 ? 'bg-[#24ab44]/55 border border-[#4ee468]' : 'bg-[#52575f]/45 border border-[#737b84]'}"></div>
                 <div style="left: ${meanPct.toFixed(1)}%" class="absolute top-0.5 bottom-0.5 w-1.5 -ml-0.5 rounded-full bg-white shadow"></div>
               </div>
-              <div class="flex justify-between text-xs font-mono-num text-slate-400 mt-0.5">
+              <div class="flex justify-between text-[11px] font-mono-num text-[#9ca3af] mt-0.5">
                 <span>p10: ${sim.p10.toFixed(1)}</span>
                 <span>p90: ${sim.p90.toFixed(1)}</span>
               </div>
             </td>
-            <td class="py-3 px-2 text-right font-mono-num">
-              <span class="px-2 py-1 rounded-lg font-bold text-xs ${
+            <td class="py-2.5 px-2 text-right font-mono-num">
+              <span class="px-2 py-0.5 rounded-xs font-extrabold text-xs ${
                 sim.medianWinProbImproved >= 0.5
-                  ? 'bg-[#00ceb8]/20 text-[#00ceb8] border border-[#00ceb8]/30'
-                  : 'bg-rose-500/15 text-rose-300 border border-rose-500/25'
+                  ? 'bg-[#184711] text-[#86efac] border border-[#2e8522]'
+                  : 'bg-[#25282e] text-[#cbd5e1] border border-[#3a3f47]'
               }">
                 ${formatPct(sim.medianWinProbImproved)}
               </span>
             </td>
-            <td class="py-3 px-2 text-right font-mono-num font-semibold text-slate-200">
+            <td class="py-2.5 px-2 text-right font-mono-num font-bold text-white">
               ${formatPct(sim.h2hWinProbImproved)}
             </td>
-            <td class="py-3 px-2 text-center font-mono-num text-xs text-slate-300">
-              <span class="text-emerald-300">${Math.round(sim.prob2_0 * 100)}%</span> /
-              <span class="text-amber-300">${Math.round(sim.prob1_1 * 100)}%</span> /
-              <span class="text-rose-300">${Math.round(sim.prob0_2 * 100)}%</span>
+            <td class="py-2.5 px-2 text-center font-mono-num text-xs text-[#cbd5e1]">
+              <span class="text-[#4ee468] font-bold">${Math.round(sim.prob2_0 * 100)}%</span> /
+              <span class="text-[#ffe600] font-bold">${Math.round(sim.prob1_1 * 100)}%</span> /
+              <span class="text-rose-400 font-bold">${Math.round(sim.prob0_2 * 100)}%</span>
             </td>
           </tr>
         `;
 
         if (r.rank === 5) {
           return rowHtml + `
-            <tr class="bg-amber-500/10 border-y border-amber-400/40">
-              <td colspan="9" class="py-1.5 px-3 text-center text-xs font-bold uppercase tracking-widest text-amber-300 font-mono-num">
-                ▲ Top 5 Beat League Median (Expected Cutoff: ${med.expectedMedianImproved.toFixed(2)} pts • Sleeper Static: ${med.staticMedianSleeper.toFixed(2)} pts) ▼
+            <tr class="bg-[#184711] border-y-2 border-[#e8c500]">
+              <td colspan="9" class="py-1.5 px-3 text-center text-xs font-extrabold uppercase tracking-widest text-[#ffe600] font-mono-num">
+                ▲ TOP 5 BEAT LEAGUE MEDIAN (EXPECTED CUTOFF: ${med.expectedMedianImproved.toFixed(2)} PTS • SLEEPER STATIC: ${med.staticMedianSleeper.toFixed(2)} PTS) ▼
               </td>
             </tr>
           `;
@@ -1293,12 +1467,12 @@
         const isNearSleeper = b.binStart <= med.staticMedianSleeper && b.binEnd >= med.staticMedianSleeper;
         const isNearMean = b.binStart <= med.expectedMedianImproved && b.binEnd >= med.expectedMedianImproved;
         const barColor = isNearMean
-          ? 'bg-[#00ceb8]'
-          : (isNearSleeper ? 'bg-amber-400' : 'bg-[#3b82f6]/60 hover:bg-[#38bdf8]');
+          ? 'bg-[#4ee468]'
+          : (isNearSleeper ? 'bg-[#ffe600]' : 'bg-[#24ab44]/65 hover:bg-[#4ee468]');
         return `
           <div class="flex-1 flex flex-col items-center justify-end h-full group relative">
-            <div style="height: ${hPct}%" class="w-full rounded-t ${barColor} transition-all"></div>
-            <div class="hidden group-hover:block absolute -top-7 bg-slate-900 border border-slate-700 text-white text-xs font-mono-num px-1.5 py-0.5 rounded whitespace-nowrap z-20">
+            <div style="height: ${hPct}%" class="w-full rounded-t-xs ${barColor} transition-all"></div>
+            <div class="hidden group-hover:block absolute -top-7 bg-black border border-[#4ee468] text-white text-xs font-mono-num px-1.5 py-0.5 rounded whitespace-nowrap z-20">
               ${b.binMid.toFixed(1)} pts (${(b.density * 100).toFixed(1)}%)
             </div>
           </div>
